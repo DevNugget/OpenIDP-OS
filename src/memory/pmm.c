@@ -12,7 +12,7 @@ static uint64_t  used_pages;
 static uint64_t  bitmap_size_bytes;
 static uint64_t  bitmap_size_pages;
 
-static uint64_t limine_hhdm;
+uint64_t limine_hhdm;
 
 static inline void bitmap_set(uint64_t bit) {
     pmm_bitmap[bit >> 3] |= (1u << (bit & 7u));

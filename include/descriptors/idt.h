@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <gdt.h>
 #include <com1.h>
+#include <pagefault.h>
 
 #define IDT_MAX_DESCRIPTORS 256
 
@@ -37,7 +38,7 @@ __attribute__((aligned(0x10)))
 extern idt_entry_t idt[IDT_MAX_DESCRIPTORS]; // Create an array of IDT entries; aligned for performance
 extern idtr_t idtr;
 
-void exception_handler(uint64_t vector, uint64_t error);
+void exception_handler(uint64_t vector, uint64_t error, uint64_t rip);
 
 void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags);
 void idt_init(void);

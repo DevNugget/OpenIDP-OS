@@ -3,21 +3,25 @@ bits 64
 %macro isr_err_stub 1
 isr_stub_%+%1:
     cli
-    mov rdi, %1        ; First argument: interrupt number
-    mov rsi, 0x0       ; Second argument: error code (0 for no error code)
+    mov rdi, %1            ; vector
+    mov rsi, [rsp]         ; error code
+    mov rdx, [rsp+8]       ; RIP
     extern exception_handler
     call exception_handler
+    add rsp, 8             ; pop error code
     iretq
 %endmacro
 
 %macro isr_no_err_stub 1
 isr_stub_%+%1:
     cli
-    mov rdi, %1        ; First argument: interrupt number
-    mov rsi, [rsp]     ; Second argument: error code (0 for no error code)
+    push 0                 ; fake error code to unify layout
+    mov rdi, %1            ; vector
+    mov rsi, [rsp]         ; error code (0)
+    mov rdx, [rsp+8]       ; RIP
     extern exception_handler
     call exception_handler
-    add rsp, 8         ; pop error code
+    add rsp, 8             ; pop fake error
     iretq
 %endmacro
 

@@ -154,8 +154,8 @@ void* pmm_alloc_page() {
         if (!bitmap_test(last_search_pos)) {
             bitmap_set(last_search_pos);
             used_pages++;
-            serial_printf("PMM: Allocated page %u (used: %u/%u)\n",
-                          last_search_pos, used_pages, total_pages);
+            //serial_printf("PMM: Allocated page %u (used: %u/%u)\n",
+            //              last_search_pos, used_pages, total_pages);
             return (void*)(last_search_pos * PAGE_SIZE + limine_hhdm);
         }
         

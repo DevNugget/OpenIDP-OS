@@ -21,6 +21,15 @@
 #define VMM_GLOBAL    (1ULL << 8)
 #define VMM_NOEXEC    (1ULL << 63)
 
+// Page table index macros
+#define PML4_INDEX(x) (((x) >> 39) & 0x1FF)
+#define PDPT_INDEX(x) (((x) >> 30) & 0x1FF)
+#define PD_INDEX(x)   (((x) >> 21) & 0x1FF)
+#define PT_INDEX(x)   (((x) >> 12) & 0x1FF)
+
+#define PAGE_ALIGN_MASK 0x000FFFFFFFFFF000ULL
+
+uint64_t read_cr3(void);
 uint64_t* vmm_create_pml4(void);
 
 void vmm_map_page(uint64_t* pml4, uint64_t virt, uint64_t phys, uint64_t flags);

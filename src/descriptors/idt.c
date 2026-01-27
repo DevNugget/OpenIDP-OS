@@ -42,13 +42,11 @@ const char *exception_names[32] = {
     "Reserved"
 };
 
-void exception_handler(uint64_t vector, uint64_t error) {
+void exception_handler(uint64_t vector, uint64_t error, uint64_t rip) {
     serial_printf("EXCEPTION %d: %s\n", vector, exception_names[vector]);
 
     if (vector == 14) {
-        uint64_t cr2;
-        asm volatile("mov %%cr2, %0" : "=r"(cr2));
-        serial_printf(" PAGE FAULT at %d", cr2);
+        pagefault_handler(error, rip);
     }
 
     serial_printf(" error=%lx\n", error);

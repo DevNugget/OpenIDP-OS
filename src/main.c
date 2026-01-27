@@ -6,6 +6,8 @@
 #include <gdt.h>
 #include <idt.h>
 #include <pmm.h>
+#include <vmm.h>
+#include <kheap.h>
 #include <com1.h>
 
 // Set the base revision to 4, this is recommended as this is the latest
@@ -44,6 +46,8 @@ static volatile struct limine_hhdm_request hhdm_request = {
     .revision = 0
 };
 
+uint64_t* kernel_pml4; // Global variable to hold the kernel's PML4 table
+
 // Finally, define the start and end markers for the Limine requests.
 // These can also be moved anywhere, to any .c file, as seen fit.
 
@@ -67,7 +71,27 @@ static void install_drivers(struct limine_memmap_response* memmap,
     gdt_init();
     idt_init();
     pmm_init(memmap, kernel_addr, hhdm_response);
+    
+    // Get current PML4 from bootloader
+    uint64_t boot_cr3 = read_cr3();
+    uint64_t* boot_pml4 = (uint64_t*)((boot_cr3 & PAGE_ALIGN_MASK) + hhdm_response->offset);
+    
+    kernel_pml4 = vmm_create_pml4();
+    
+    // CRITICAL: Copy all existing mappings from bootloader's PML4
+    // This includes HHDM region, kernel, and any other mappings
+    for (size_t i = 0; i < 512; i++) {
+        if (boot_pml4[i] & VMM_PRESENT) {
+            kernel_pml4[i] = boot_pml4[i];
+        }
+    }
+
+    serial_printf("About to switch CR3 to %x\n", kernel_pml4);
+    vmm_switch_pml4(kernel_pml4);
+
+    heap_init();
 }
+
 
 // The following will be our kernel's entry point.
 // If renaming kmain() to something else, make sure to change the
@@ -99,6 +123,9 @@ void kmain(void) {
         volatile uint32_t *fb_ptr = framebuffer->address;
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
+
+    void* p = kmalloc(128);
+    kfree(p);
 
     // We're done, just hang...
     hcf();

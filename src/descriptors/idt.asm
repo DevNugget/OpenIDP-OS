@@ -1,5 +1,7 @@
 bits 64
 
+global irq_stub_32
+
 %macro isr_err_stub 1
 isr_stub_%+%1:
     cli
@@ -22,6 +24,59 @@ isr_stub_%+%1:
     extern exception_handler
     call exception_handler
     add rsp, 8             ; pop fake error
+    iretq
+%endmacro
+
+%macro irq_stub 1
+irq_stub_%+%1:
+    ; 1. CPU has already pushed SS, RSP, RFLAGS, CS, RIP
+    
+    ; 2. Push general purpose registers (Context)
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    ; 3. Prepare arguments for C handler
+    mov rdi, %1          ; Argument 1: IRQ Number
+    mov rsi, rsp         ; Argument 2: Current Stack Pointer (points to R15)
+
+    extern irq_handler
+    cld                  ; Clear direction flag (standard ABI requirement)
+    call irq_handler     ; Returns the NEW Stack Pointer (RSP) in RAX
+
+    ; 4. Switch Stacks
+    mov rsp, rax         ; Switch to the new task's stack!
+
+    ; 5. Restore registers (from the NEW stack)
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    ; 6. Return from interrupt
     iretq
 %endmacro
 
@@ -60,11 +115,32 @@ section .text
     isr_err_stub    30
     isr_no_err_stub 31
 
+    irq_stub 32
+    irq_stub 33
+    irq_stub 34
+    irq_stub 35
+    irq_stub 36
+    irq_stub 37
+    irq_stub 38
+    irq_stub 39
+    irq_stub 40
+    irq_stub 41
+    irq_stub 42
+    irq_stub 43
+    irq_stub 44
+    irq_stub 45
+    irq_stub 46
+    irq_stub 47
+
 section .data
     global isr_stub_table
     isr_stub_table:
     %assign i 0 
-    %rep    32 
-        dq isr_stub_%+i 
+    %rep    48  ; Changed from 32 to 48 (32 exceptions + 16 IRQs)
+        %if i < 32
+            dq isr_stub_%+i 
+        %else
+            dq irq_stub_%+i  ; Note: IRQ stubs use irq_stub_ prefix
+        %endif
     %assign i i+1 
     %endrep

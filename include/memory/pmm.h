@@ -1,5 +1,5 @@
 #ifndef PMM_H
-#define PMM_H 1
+#define PMM_H
 
 #include <stdint.h>
 #include <stddef.h>

@@ -1,5 +1,5 @@
 #ifndef VMM_H
-#define VMM_H 1
+#define VMM_H
 
 #include <stdint.h>
 #include <stddef.h>

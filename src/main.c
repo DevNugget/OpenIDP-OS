@@ -8,6 +8,8 @@
 #include <pmm.h>
 #include <vmm.h>
 #include <kheap.h>
+#include <task.h>
+#include <pic.h>
 #include <com1.h>
 
 // Set the base revision to 4, this is recommended as this is the latest
@@ -64,12 +66,28 @@ static void hcf(void) {
     }
 }
 
+void task_a() {
+    while(1) {
+        serial_printf("A");
+        // Slow down so we don't spam serial too fast
+        for(volatile int i=0; i<10000000; i++); 
+    }
+}
+
+void task_b() {
+    while(1) {
+        serial_printf("B");
+        for(volatile int i=0; i<10000000; i++);
+    }
+}
+
 static void install_drivers(struct limine_memmap_response* memmap,
                              struct limine_executable_address_response* kernel_addr,
                              struct limine_hhdm_response* hhdm_response) {
     serial_init();
     gdt_init();
     idt_init();
+    
     pmm_init(memmap, kernel_addr, hhdm_response);
     
     // Get current PML4 from bootloader
@@ -124,8 +142,19 @@ void kmain(void) {
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
 
-    void* p = kmalloc(128);
-    kfree(p);
+    init_scheduler();
+
+    create_kernel_task(task_a);
+    create_kernel_task(task_b);
+    
+    pit_init(50); // 50Hz context switching
+    
+    // We are now the "idle" task (PID 0)
+    while(1) {
+        serial_printf(".");
+        for(volatile int i=0; i<10000000; i++);
+        asm("hlt");
+    }
 
     // We're done, just hang...
     hcf();

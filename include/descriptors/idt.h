@@ -1,11 +1,13 @@
 #ifndef IDT_H
-#define IDT_H 1
+#define IDT_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <gdt.h>
 #include <com1.h>
 #include <pagefault.h>
+#include <pit.h>
+#include <pic.h>
 
 #define IDT_MAX_DESCRIPTORS 256
 
@@ -42,5 +44,7 @@ void exception_handler(uint64_t vector, uint64_t error, uint64_t rip);
 
 void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags);
 void idt_init(void);
+
+uint64_t irq_handler(uint64_t irq, uint64_t current_rsp);
 
 #endif

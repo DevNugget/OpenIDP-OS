@@ -1,5 +1,5 @@
 #ifndef COM1_H
-#define COM1_H 1
+#define COM1_H
 
 #include <stdarg.h>
 #include <io.h>

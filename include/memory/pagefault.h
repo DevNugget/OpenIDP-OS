@@ -1,5 +1,5 @@
 #ifndef PAGEFAULT_H
-#define PAGEFAULT_H 1
+#define PAGEFAULT_H
 
 #include <stdint.h>
 #include <com1.h>

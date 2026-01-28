@@ -1,5 +1,5 @@
 #ifndef KSTRING_H
-#define KSTRING_H 1
+#define KSTRING_H
 
 #include <stddef.h>
 #include <stdint.h>

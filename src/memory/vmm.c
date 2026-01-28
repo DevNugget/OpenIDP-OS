@@ -8,8 +8,8 @@ uint64_t read_cr3(void) {
     return val;
 }
 
-static inline void write_cr3(uint64_t val) {
-    asm volatile("mov %0, %%cr3" :: "r"(val) : "memory");
+void write_cr3(uint64_t val) {
+    asm volatile("mov %0, %%cr3" : : "r"(val) : "memory");
 }
 
 static inline void invlpg(uint64_t virt) {
@@ -28,13 +28,11 @@ static inline uint64_t virt_to_phys(void* virt) {
 
 // FIXED: Only allocates if table doesn't exist, assumes tables are accessible
 static uint64_t* get_or_alloc_table(uint64_t* table, size_t index) {
-    // Check if entry exists and is present
     if (table[index] & VMM_PRESENT) {
         uint64_t phys_addr = table[index] & PAGE_ALIGN_MASK;
         return phys_to_virt(phys_addr);
     }
     
-    // Allocate new table
     void* new_table = pmm_alloc_page();
     if (!new_table) {
         serial_printf("VMM PANIC: Out of memory allocating page table\n");
@@ -43,9 +41,11 @@ static uint64_t* get_or_alloc_table(uint64_t* table, size_t index) {
     
     memset(new_table, 0, PAGE_SIZE);
     
-    // Get physical address and update parent table
     uint64_t new_phys = virt_to_phys(new_table);
-    table[index] = new_phys | VMM_PRESENT | VMM_WRITE;
+    
+    // CHANGE IS HERE: Add VMM_USER (0x4)
+    // This allows children of this table to be User pages if they want to be.
+    table[index] = new_phys | VMM_PRESENT | VMM_WRITE | VMM_USER;
     
     return (uint64_t*)new_table;
 }
@@ -130,4 +130,29 @@ uint64_t* vmm_create_pml4(void) {
 void vmm_switch_pml4(uint64_t* pml4) {
     uint64_t phys = virt_to_phys(pml4);
     write_cr3(phys);
+}
+
+uint64_t* vmm_create_process_pml4(uint64_t* master_kernel_pml4) {
+    // 1. Allocate a physical page for the new PML4
+    void* new_pml4_phys = pmm_alloc_page();
+    if (!new_pml4_phys) return NULL;
+
+    // 2. Get the virtual address so we can write to it
+    // Note: pmm_alloc_page usually returns HHDM address in many setups, 
+    // adjust if your pmm returns pure physical addresses.
+    uint64_t* new_pml4_virt = (uint64_t*)new_pml4_phys; 
+
+    // 3. Zero out the lower half (User Space)
+    for (int i = 0; i < 256; i++) {
+        new_pml4_virt[i] = 0;
+    }
+
+    // 4. Copy the upper half (Kernel Space) from the master PML4
+    // This includes the HHDM, Kernel binary, and Kernel Heap
+    for (int i = 256; i < 512; i++) {
+        new_pml4_virt[i] = master_kernel_pml4[i];
+    }
+
+    // Return the physical address (which is what CR3 expects)
+    return (uint64_t*)virt_to_phys(new_pml4_virt);
 }

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <com1.h>
+#include <tss.h>
 
 // GDT entry flags
 #define GDT_PRESENT     0x80    // Bit 7

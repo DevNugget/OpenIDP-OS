@@ -48,6 +48,12 @@ static volatile struct limine_hhdm_request hhdm_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_module_request module_request = {
+    .id = LIMINE_MODULE_REQUEST_ID,
+    .revision = 0
+};
+
 uint64_t* kernel_pml4; // Global variable to hold the kernel's PML4 table
 
 // Finally, define the start and end markers for the Limine requests.
@@ -144,8 +150,18 @@ void kmain(void) {
 
     init_scheduler();
 
-    create_kernel_task(task_a);
-    create_kernel_task(task_b);
+
+    struct limine_module_response* modules = module_request.response;
+    if (modules && modules->module_count > 0) {
+        struct limine_file* file = modules->modules[0];
+        serial_printf("Found module: %s\n", file->path);
+        
+        create_user_process(file->address);
+    } else {
+        serial_printf("No modules found!\n");
+    }
+    //create_kernel_task(task_a);
+    //create_kernel_task(task_b);
     
     pit_init(50); // 50Hz context switching
     

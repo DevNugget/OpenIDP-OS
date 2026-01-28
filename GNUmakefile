@@ -81,12 +81,14 @@ override CPPFLAGS := \
     -I src/drivers/ \
     -I src/memory/ \
     -I src/process/ \
+    -I src/elf/ \
 	-I include/ \
     -I include/descriptors/ \
     -I include/utility/ \
     -I include/drivers/ \
     -I include/memory/ \
     -I include/process/ \
+    -I include/elf/ \
     $(CPPFLAGS) \
     -MMD \
     -MP

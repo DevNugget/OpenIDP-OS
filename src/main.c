@@ -11,6 +11,7 @@
 #include <task.h>
 #include <pic.h>
 #include <com1.h>
+#include <graphics.h>
 
 // Set the base revision to 4, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -23,12 +24,6 @@ static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(4);
 // the compiler does not optimise them away, so, usually, they should
 // be made volatile or equivalent, _and_ they should be accessed at least
 // once or marked as used with the "used" attribute as done here.
-
-__attribute__((used, section(".limine_requests")))
-static volatile struct limine_framebuffer_request framebuffer_request = {
-    .id = LIMINE_FRAMEBUFFER_REQUEST_ID,
-    .revision = 0
-};
 
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_memmap_request memmap_request = {
@@ -133,34 +128,38 @@ void kmain(void) {
 
     install_drivers(memmap, kernel_addr, hhdm_response);
 
-    // Ensure we got a framebuffer.
-    if (framebuffer_request.response == NULL
-     || framebuffer_request.response->framebuffer_count < 1) {
-        hcf();
-    }
-
-    // Fetch the first framebuffer.
-    struct limine_framebuffer *framebuffer = framebuffer_request.response->framebuffers[0];
-
-    // Note: we assume the framebuffer model is RGB with 32-bit pixels.
-    for (size_t i = 0; i < 100; i++) {
-        volatile uint32_t *fb_ptr = framebuffer->address;
-        fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
-    }
-
     init_scheduler();
-
 
     create_kernel_task(task_a);
     create_kernel_task(task_b);
     struct limine_module_response* modules = module_request.response;
+
+    void* psf1_font_address = NULL;
+    void* psf2_font_address = NULL;
+
     if (modules && modules->module_count > 0) {
         struct limine_file* file = modules->modules[0];
         serial_printf("Found module: %s\n", file->path);
         
+        struct limine_file* psf1_font_file = modules->modules[1];
+        serial_printf("Found module: %s\n", psf1_font_file->path);
+
+        struct limine_file* psf2_font_file = modules->modules[2];
+        serial_printf("Found module: %s\n", psf2_font_file->path);
+
+        psf1_font_address = psf1_font_file->address;
+        psf2_font_address = psf2_font_file->address;
+
         create_user_process(file->address);
     } else {
         serial_printf("No modules found!\n");
+    }
+
+    if (psf1_font_address && psf2_font_address) {
+        graphics_init(psf1_font_address, psf2_font_address);
+        fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
+    } else {
+        serial_printf("Font not found!\n");
     }
     
     pit_init(50); // 50Hz context switching

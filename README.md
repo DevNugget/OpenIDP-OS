@@ -11,6 +11,8 @@ OpenIDP (Idiot's Dream Project) is a 64 bit hobby operating system developed in 
 - Drivers
   - [x] COM1 Serial Output
   - [x] PIT Timer
+  - [x] PSF1 & PSF2 Font Loader
+  - [x] (W.I.P) Graphics Library
 - Memory
   - [x] Physical Memory Manager
   - [x] Virtual Memory Manager

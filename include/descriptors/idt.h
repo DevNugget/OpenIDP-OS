@@ -40,6 +40,8 @@ __attribute__((aligned(0x10)))
 extern idt_entry_t idt[IDT_MAX_DESCRIPTORS]; // Create an array of IDT entries; aligned for performance
 extern idtr_t idtr;
 
+extern void syscall_stub(void);
+
 void exception_handler(uint64_t vector, uint64_t error, uint64_t rip);
 
 void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags);

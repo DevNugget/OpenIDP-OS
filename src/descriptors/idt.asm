@@ -132,6 +132,71 @@ section .text
     irq_stub 46
     irq_stub 47
 
+extern syscall_dispatcher
+
+global syscall_stub
+syscall_stub:
+    ; 1. CPU has pushed SS, RSP, RFLAGS, CS, RIP
+    
+    ; 2. Push context (matches registers_t in task.h)
+    ; Note: We push RAX first (highest offset in struct after interrupt frame)
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    ; 3. Prepare arguments for C handler
+    ; syscall_dispatcher(registers_t* regs)
+    mov rdi, rsp        ; Pass pointer to stack structure as 1st argument
+
+    cld                 ; Clear direction flag
+    call syscall_dispatcher
+    
+    ; 4. Handle Return Value
+    ; syscall_dispatcher returns the result in RAX. 
+    ; We need to overwrite the saved RAX on the stack so the pop restores it.
+    ; Offset of RAX: It was the *first* register pushed manually.
+    ; Stack layout (growing down):
+    ; [SS, RSP, RFLAGS, CS, RIP] (High addresses)
+    ; [RAX] <--- We want to write here
+    ; [RBX]
+    ; ...
+    ; [R15] (RSP points here)
+    
+    ; R15 is at RSP+0, R14 at RSP+8 ... RAX is at RSP + (14 * 8) = RSP + 112
+    mov [rsp + 112], rax 
+
+    ; 5. Restore registers
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax  ; This pops the NEW return value we just wrote
+
+    ; 6. Return to user space
+    iretq
+
 section .data
     global isr_stub_table
     isr_stub_table:

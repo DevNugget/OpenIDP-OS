@@ -2,10 +2,13 @@
 
 extern uint64_t* kernel_pml4; // From main.c
 extern uint64_t limine_hhdm;
+extern void exit_switch_to(uint64_t rsp);
 
 static task_t* current_task = NULL;
-static task_t* task_head = NULL;
+task_t* task_head = NULL;
 static uint64_t next_pid = 1;
+
+static task_t* zombie_task = NULL;
 
 void init_scheduler(void) {
     // Create a task wrapper for the currently running kernel code
@@ -169,8 +172,69 @@ void create_user_process(void* elf_data) {
     serial_printf("Process loaded! Entry: 0x%x\n", header->e_entry);
 }
 
+void task_exit(void) {
+    asm volatile("cli"); // Disable interrupts immediately
+    
+    task_t* victim = current_task;
+    
+    serial_printf("Exiting PID %d...\n", victim->pid);
+
+    // 1. Find the previous task in the list to unlink 'victim'
+    task_t* prev = task_head;
+    while (prev->next != victim) {
+        prev = prev->next;
+        // Safety check: if loop wraps around and we don't find victim
+        if (prev == task_head && victim != task_head) {
+             serial_printf("Panic: Corrupt task list\n");
+             while(1);
+        }
+    }
+
+    // 2. Unlink the victim
+    prev->next = victim->next;
+    
+    // If we are killing the head, move the head
+    if (victim == task_head) {
+        task_head = victim->next;
+    }
+
+    // 3. Mark as zombie (Scheduled for deletion by the next task)
+    zombie_task = victim;
+
+    // 4. Switch to next task manually
+    current_task = victim->next; // Move current pointer to next
+
+    tss_set_rsp0(current_task->kernel_stack + 4096);
+
+    uint64_t old_cr3 = read_cr3();
+    if (current_task->cr3 != 0 && current_task->cr3 != old_cr3) {
+        write_cr3(current_task->cr3);
+    }
+
+    // 5. Jump to the new stack and restore registers
+    // This function DOES NOT RETURN.
+    exit_switch_to(current_task->rsp);
+}
+
 // This is called by the timer handler
 uint64_t scheduler_schedule(uint64_t current_rsp) {
+    // 1. Clean up any zombies left by previous exit calls
+    if (zombie_task != NULL) {
+        // Free Kernel Stack
+        kfree((void*)zombie_task->kernel_stack);
+        
+        // Free PML4 Page (Physical Address)
+        // We calculate Virtual address to pass to pmm_free_page (if your pmm expects virt or phys)
+        // pmm_free_page expects a HHDM virtual address:
+        void* pml4_virt = (void*)(zombie_task->cr3 + limine_hhdm);
+        pmm_free_page(pml4_virt);
+        
+        // Free Task Struct
+        kfree(zombie_task);
+        
+        // Clear zombie ptr
+        zombie_task = NULL;
+    }
     if (!current_task) return current_rsp;
 
     // Save the stack pointer of the task we are LEAVING
@@ -188,6 +252,8 @@ uint64_t scheduler_schedule(uint64_t current_rsp) {
     if (current_task->cr3 != 0 && current_task->cr3 != old_cr3) {
         write_cr3(current_task->cr3);
     }
+
+    //serial_printf("Switching to PID %d\n", current_task->pid);
 
     // Return the stack pointer of the task we are ENTERING
     return current_task->rsp;

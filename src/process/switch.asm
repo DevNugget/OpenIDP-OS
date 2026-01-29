@@ -54,3 +54,30 @@ switch_context:
 get_current_rsp:
     mov rax, rsp
     ret
+
+; void exit_switch_to(uint64_t next_rsp)
+global exit_switch_to
+exit_switch_to:
+    mov rsp, rdi      ; Switch to the new task's stack immediately
+    
+    ; Now we are on the new stack. This stack has an interrupt frame 
+    ; (registers + iret frame) pushed by the scheduler/interrupt stub.
+    ; We must pop them exactly as idt.asm does.
+    
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    
+    iretq

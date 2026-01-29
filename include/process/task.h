@@ -32,4 +32,6 @@ void create_kernel_task(void (*entry_point)());
 void create_user_process(void* elf_data);
 uint64_t scheduler_schedule(uint64_t current_rsp);
 
+void task_exit(void);
+
 #endif

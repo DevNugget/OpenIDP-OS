@@ -151,6 +151,8 @@ void kmain(void) {
     init_scheduler();
 
 
+    create_kernel_task(task_a);
+    create_kernel_task(task_b);
     struct limine_module_response* modules = module_request.response;
     if (modules && modules->module_count > 0) {
         struct limine_file* file = modules->modules[0];
@@ -160,8 +162,6 @@ void kmain(void) {
     } else {
         serial_printf("No modules found!\n");
     }
-    //create_kernel_task(task_a);
-    //create_kernel_task(task_b);
     
     pit_init(50); // 50Hz context switching
     

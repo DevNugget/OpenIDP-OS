@@ -45,7 +45,7 @@ void* kmalloc(size_t size) {
 
     heap_block_t* block = get_last_block();
     block->free = 0;
-    return (void*)(block + 1) + limine_hhdm;
+    return (void*)(block + 1);
 }
 
 void kfree(void* ptr) {

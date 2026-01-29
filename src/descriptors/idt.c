@@ -126,6 +126,8 @@ void idt_init() {
         vectors[32 + i] = true;
     }
 
+    idt_set_descriptor(0x80, syscall_stub, IDT_USER_INTERRUPT);
+
     lidt(&idtr); // load the new IDT
 
     pic_enable_irq(0); // Enable IRQ0 (PIT)

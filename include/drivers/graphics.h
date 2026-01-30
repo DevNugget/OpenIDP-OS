@@ -12,7 +12,7 @@ typedef enum {
     USE_PSF2
 } font_type_t;
 
-void graphics_init(void *font_file_psf1, void *font_file_psf2);
+void graphics_init(const char* psf1_path, const char* psf2_path);
 
 uint64_t fb_width();
 uint64_t fb_height();

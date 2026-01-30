@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <kheap.h>
 #include <com1.h>
+#include <fatfs/ff.h>
 
 // PSF1 Header Magic Constants
 #define PSF1_MAGIC0 0x36
@@ -43,7 +44,7 @@ typedef struct {
     void* glyph_buffer;
 } psf2_font_t;
 
-psf1_font_t* psf1_load_font(void* font_file);
-psf2_font_t* psf2_load_font(void* font_file);
+psf1_font_t* psf1_load_font(const char* path);
+psf2_font_t* psf2_load_font(const char* path);
 
 #endif

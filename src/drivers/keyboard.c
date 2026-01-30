@@ -28,7 +28,7 @@ static char scancode_map_shifted[128] = {
 void keyboard_init(void) {
     pic_enable_irq(1);
 
-    serial_printf("Keyboard driver installed (PIC 1 unmasked)");
+    serial_printf("Keyboard driver installed (PIC 1 unmasked)\n");
 }
 
 void keyboard_buffer_write(char c) {

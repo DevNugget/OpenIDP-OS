@@ -10,7 +10,7 @@ struct limine_framebuffer* framebuffer;
 static psf1_font_t current_font_psf1;
 static psf2_font_t current_font_psf2;
 
-void graphics_init(void *font_file_psf1, void *font_file_psf2) {
+void graphics_init(const char* psf1_path, const char* psf2_path) {
     // Ensure we got a framebuffer.
     if (framebuffer_request.response == NULL
      || framebuffer_request.response->framebuffer_count < 1) {
@@ -27,8 +27,8 @@ void graphics_init(void *font_file_psf1, void *font_file_psf2) {
         (uint32_t)framebuffer->bpp,
         (uint32_t)framebuffer->pitch);
     
-    current_font_psf1 = *psf1_load_font(font_file_psf1);
-    current_font_psf2 = *psf2_load_font(font_file_psf2);
+    current_font_psf1 = *psf1_load_font(psf1_path);
+    current_font_psf2 = *psf2_load_font(psf2_path);
 }
 
 uint64_t fb_width() {

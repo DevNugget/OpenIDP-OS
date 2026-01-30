@@ -56,3 +56,25 @@ int memcmp(const void *s1, const void *s2, size_t n) {
 
     return 0;
 }
+
+char *strchr(const char *s, int c) {
+    // Loop through each character in the string
+    while (*s != '\0') {
+        // Check if current character matches the search character
+        if (*s == (char)c) {
+            // Cast away const - this is safe because the return type
+            // is non-const, and we're returning a pointer to a character
+            // in the original string
+            return (char *)s;
+        }
+        s++;
+    }
+    
+    // Check for null terminator if c is '\0'
+    if ((char)c == '\0') {
+        return (char *)s;
+    }
+    
+    // Character not found
+    return NULL;
+}

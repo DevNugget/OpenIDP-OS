@@ -13,6 +13,7 @@
 #include <com1.h>
 #include <graphics.h>
 #include <keyboard.h>
+#include <fatfs/ff.h>
 
 // Set the base revision to 4, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -83,6 +84,17 @@ void task_b() {
     }
 }
 
+FATFS fat_fs;
+
+void mount_filesystem() {
+    FRESULT res = f_mount(&fat_fs, "", 1); // 1 = mount now
+    if (res != FR_OK) {
+        serial_printf("Failed to mount filesystem\n");
+        return;
+    }
+    serial_printf("Mounted filesystem\n");
+}
+
 static void install_drivers(struct limine_memmap_response* memmap,
                              struct limine_executable_address_response* kernel_addr,
                              struct limine_hhdm_response* hhdm_response) {
@@ -111,6 +123,7 @@ static void install_drivers(struct limine_memmap_response* memmap,
 
     heap_init();
     keyboard_init();
+    mount_filesystem();
 }
 
 
@@ -136,33 +149,17 @@ void kmain(void) {
     //create_kernel_task(task_b);
     struct limine_module_response* modules = module_request.response;
 
-    void* psf1_font_address = NULL;
-    void* psf2_font_address = NULL;
-
     if (modules && modules->module_count > 0) {
         struct limine_file* file = modules->modules[0];
         serial_printf("Found module: %s\n", file->path);
-        
-        struct limine_file* psf1_font_file = modules->modules[1];
-        serial_printf("Found module: %s\n", psf1_font_file->path);
-
-        struct limine_file* psf2_font_file = modules->modules[2];
-        serial_printf("Found module: %s\n", psf2_font_file->path);
-
-        psf1_font_address = psf1_font_file->address;
-        psf2_font_address = psf2_font_file->address;
 
         //create_user_process(file->address);
     } else {
         serial_printf("No modules found!\n");
     }
 
-    if (psf1_font_address && psf2_font_address) {
-        graphics_init(psf1_font_address, psf2_font_address);
-        fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
-    } else {
-        serial_printf("Font not found!\n");
-    }
+    graphics_init("/fonts/zap18.psf", "/fonts/zap24.psf");
+    fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
     
     pit_init(50); // 50Hz context switching
     

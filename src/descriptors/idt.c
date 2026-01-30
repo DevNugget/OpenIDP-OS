@@ -142,6 +142,8 @@ uint64_t irq_handler(uint64_t irq, uint64_t current_rsp) {
     if (irq == 32) { // PIT (Timer)
         // pit_handler now needs to return the new stack pointer
         new_rsp = pit_handler(current_rsp);
+    } else if (irq == 33) {
+        keyboard_handler();
     }
     
     // Acknowledge PIC

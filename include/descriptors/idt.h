@@ -8,6 +8,7 @@
 #include <pagefault.h>
 #include <pit.h>
 #include <pic.h>
+#include <keyboard.h>
 
 #define IDT_MAX_DESCRIPTORS 256
 

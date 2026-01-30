@@ -12,6 +12,7 @@
 #include <pic.h>
 #include <com1.h>
 #include <graphics.h>
+#include <keyboard.h>
 
 // Set the base revision to 4, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -109,6 +110,7 @@ static void install_drivers(struct limine_memmap_response* memmap,
     vmm_switch_pml4(kernel_pml4);
 
     heap_init();
+    keyboard_init();
 }
 
 
@@ -130,8 +132,8 @@ void kmain(void) {
 
     init_scheduler();
 
-    create_kernel_task(task_a);
-    create_kernel_task(task_b);
+    //create_kernel_task(task_a);
+    //create_kernel_task(task_b);
     struct limine_module_response* modules = module_request.response;
 
     void* psf1_font_address = NULL;
@@ -150,7 +152,7 @@ void kmain(void) {
         psf1_font_address = psf1_font_file->address;
         psf2_font_address = psf2_font_file->address;
 
-        create_user_process(file->address);
+        //create_user_process(file->address);
     } else {
         serial_printf("No modules found!\n");
     }
@@ -164,6 +166,20 @@ void kmain(void) {
     
     pit_init(50); // 50Hz context switching
     
+    serial_printf("Waiting for input...\n");
+    
+    while(1) {
+        char c = keyboard_read_char();
+        if (c != 0) {
+            // If we got a character, print it!
+            serial_printf("Key pressed: %c\n", c);
+            
+            // If you implemented the video driver from the previous step:
+            // char str[2] = {c, '\0'};
+            // draw_string(str, 100, 100, 0xFFFFFF, 0x000000); 
+        }
+    }
+
     // We are now the "idle" task (PID 0)
     while(1) {
         serial_printf(".");

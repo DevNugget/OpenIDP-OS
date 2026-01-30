@@ -1,5 +1,8 @@
 #include <task.h>
 
+#define USER_STACK_SIZE (16 * 1024 * 1024)  // 16MB
+#define USER_STACK_TOP 0x700000000  // Start of user stack region
+
 extern uint64_t* kernel_pml4; // From main.c
 extern uint64_t limine_hhdm;
 extern void exit_switch_to(uint64_t rsp);
@@ -137,10 +140,30 @@ void create_user_process(void* elf_data) {
         }
     }
 
-    // 4. Allocate User Stack
-    uint64_t user_stack_top = 0x700000000;
-    void* stack_virt = pmm_alloc_page();
-    vmm_map_page(pml4_virt, user_stack_top - 4096, get_phys_addr(stack_virt), 0x7);
+    // Calculate number of pages needed for 16MB
+    size_t stack_pages = USER_STACK_SIZE / 4096;
+    if (USER_STACK_SIZE % 4096 != 0) {
+        stack_pages++;  // Round up if not exact multiple of page size
+    }
+
+    // Allocate and map each page
+    for (size_t i = 0; i < stack_pages; i++) {
+        void* stack_page = pmm_alloc_page();
+        if (!stack_page) {
+            // Handle allocation failure - free any already allocated pages
+            // You may want to add cleanup logic here
+            serial_printf("No more memory to map user stack. Blowing up now fuck you!");
+            return;
+        }
+        
+        // Map page at appropriate virtual address
+        // Stack grows downward, so we start from the top
+        uint64_t page_vaddr = USER_STACK_TOP - ((i + 1) * 4096);
+        vmm_map_page(pml4_virt, page_vaddr, get_phys_addr(stack_page), 0x7);
+    }
+
+    // Set initial stack pointer (top of allocated stack)
+    uint64_t user_stack_top = USER_STACK_TOP;
 
     // 5. Create Task Structure
     task_t* new_task = (task_t*)kmalloc(sizeof(task_t));

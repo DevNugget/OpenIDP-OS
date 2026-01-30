@@ -149,33 +149,19 @@ void kmain(void) {
     //create_kernel_task(task_b);
     struct limine_module_response* modules = module_request.response;
 
+    graphics_init("/fonts/zap18.psf", "/fonts/zap24.psf");
     if (modules && modules->module_count > 0) {
         struct limine_file* file = modules->modules[0];
         serial_printf("Found module: %s\n", file->path);
 
-        //create_user_process(file->address);
+        create_user_process(file->address);
     } else {
         serial_printf("No modules found!\n");
     }
 
-    graphics_init("/fonts/zap18.psf", "/fonts/zap24.psf");
-    fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
+    //fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
     
     pit_init(50); // 50Hz context switching
-    
-    serial_printf("Waiting for input...\n");
-    
-    while(1) {
-        char c = keyboard_read_char();
-        if (c != 0) {
-            // If we got a character, print it!
-            serial_printf("Key pressed: %c\n", c);
-            
-            // If you implemented the video driver from the previous step:
-            // char str[2] = {c, '\0'};
-            // draw_string(str, 100, 100, 0xFFFFFF, 0x000000); 
-        }
-    }
 
     // We are now the "idle" task (PID 0)
     while(1) {

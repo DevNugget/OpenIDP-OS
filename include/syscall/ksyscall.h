@@ -15,6 +15,9 @@
 #define SYS_GET_SCREEN_PROP 3
 #define SYS_DRAW_RECT 4
 #define SYS_BLIT 5
+#define SYS_DRAW_STRING 6
+#define SYS_EXEC 7
+#define SYS_GET_FB_INFO 8
 
 void syscall_init(void);
 uint64_t syscall_dispatcher(registers_t* regs);

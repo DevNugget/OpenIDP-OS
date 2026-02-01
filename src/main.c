@@ -150,6 +150,7 @@ void kmain(void) {
     struct limine_module_response* modules = module_request.response;
 
     graphics_init("/fonts/zap18.psf", "/fonts/zap24.psf");
+    /*
     if (modules && modules->module_count > 0) {
         struct limine_file* file = modules->modules[0];
         serial_printf("Found module: %s\n", file->path);
@@ -158,10 +159,13 @@ void kmain(void) {
     } else {
         serial_printf("No modules found!\n");
     }
+    */
 
-    //fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
-    
-    pit_init(50); // 50Hz context switching
+   
+   //fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
+   
+   pit_init(50); // 50Hz context switching
+   create_user_process_from_file("/bin/idpwm.elf", 1);
 
     // We are now the "idle" task (PID 0)
     while(1) {

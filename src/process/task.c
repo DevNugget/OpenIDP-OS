@@ -1,13 +1,12 @@
 #include <task.h>
 
-#define USER_STACK_SIZE (16 * 1024 * 1024)  // 16MB
-#define USER_STACK_TOP 0x700000000  // Start of user stack region
-
 extern uint64_t* kernel_pml4; // From main.c
 extern uint64_t limine_hhdm;
 extern void exit_switch_to(uint64_t rsp);
 
-static task_t* current_task = NULL;
+extern struct limine_framebuffer* framebuffer;
+
+task_t* current_task = NULL;
 task_t* task_head = NULL;
 static uint64_t next_pid = 1;
 
@@ -193,6 +192,157 @@ void create_user_process(void* elf_data) {
     new_task->next = next;
     
     serial_printf("Process loaded! Entry: 0x%x\n", header->e_entry);
+}
+
+void create_user_process_from_file(const char* filename, int is_wm) {
+    FIL file;
+    FRESULT res;
+    UINT bytes_read;
+
+    // 1. Open the ELF file
+    res = f_open(&file, filename, FA_READ);
+    if (res != FR_OK) {
+        serial_printf("Failed to open file: %s (Error: %d)\n", filename, res);
+        return;
+    }
+
+    // 2. Read ELF Header
+    Elf64_Ehdr header;
+    res = f_read(&file, &header, sizeof(Elf64_Ehdr), &bytes_read);
+    
+    if (res != FR_OK || bytes_read != sizeof(Elf64_Ehdr)) {
+        serial_printf("Failed to read ELF header\n");
+        f_close(&file);
+        return;
+    }
+
+    // 3. Verify Magic
+    if (header.e_ident[0] != 0x7F || header.e_ident[1] != 'E' || 
+        header.e_ident[2] != 'L' || header.e_ident[3] != 'F') {
+        serial_printf("Invalid ELF Magic in file\n");
+        f_close(&file);
+        return;
+    }
+
+    // 4. Create Process Address Space
+    uint64_t* pml4_virt = pmm_alloc_page(); 
+    uint64_t* pml4_phys = (uint64_t*)get_phys_addr(pml4_virt);
+    
+    memset(pml4_virt, 0, 256 * sizeof(uint64_t));
+    for (int i = 256; i < 512; i++) {
+        pml4_virt[i] = kernel_pml4[i];
+    }
+
+    // 5. Read Program Headers
+    // Calculate size needed for all program headers
+    uint32_t ph_size = header.e_phnum * sizeof(Elf64_Phdr);
+    Elf64_Phdr* phdr = (Elf64_Phdr*)kmalloc(ph_size);
+    
+    // Seek to the program header table in the file
+    f_lseek(&file, header.e_phoff);
+    f_read(&file, phdr, ph_size, &bytes_read);
+
+    // 6. Load Segments
+    for (int i = 0; i < header.e_phnum; i++) {
+        if (phdr[i].p_type == PT_LOAD) {
+            uint64_t filesz = phdr[i].p_filesz;
+            uint64_t memsz = phdr[i].p_memsz;
+            uint64_t vaddr = phdr[i].p_vaddr;
+            uint64_t file_offset = phdr[i].p_offset;
+
+            // Calculate number of pages needed for this segment
+            uint64_t count = (memsz + 0xFFF) / 4096;
+            
+            for (uint64_t j = 0; j < count; j++) {
+                uint64_t offset = j * 4096;
+                
+                // A. Allocate a new page (returns HHDM Virtual Address)
+                void* page_virt = pmm_alloc_page();
+                uint64_t page_phys = get_phys_addr(page_virt);
+                
+                // B. Map it to User Space
+                vmm_map_page(pml4_virt, vaddr + offset, page_phys, 0x7); // User | RW | Present
+                
+                // C. Clear the page (Important for BSS and partial pages)
+                memset(page_virt, 0, 4096);
+
+                // D. Read data from File into this page
+                if (offset < filesz) {
+                    uint64_t copy_size = filesz - offset;
+                    if (copy_size > 4096) copy_size = 4096;
+                    
+                    // Seek to the correct offset in the file for THIS page
+                    f_lseek(&file, file_offset + offset);
+                    
+                    // Read directly into the page memory
+                    f_read(&file, page_virt, copy_size, &bytes_read);
+                }
+            }
+        }
+    }
+
+    // Cleanup Program Headers buffer
+    kfree(phdr);
+    
+    // Close the file (We are done reading)
+    f_close(&file);
+
+    // 7. Allocate User Stack (Same as before)
+    size_t stack_pages = USER_STACK_SIZE / 4096;
+    if (USER_STACK_SIZE % 4096 != 0) stack_pages++;
+
+    for (size_t i = 0; i < stack_pages; i++) {
+        void* stack_page = pmm_alloc_page();
+        if (!stack_page) {
+            serial_printf("OOM during stack allocation\n");
+            return;
+        }
+        uint64_t page_vaddr = USER_STACK_TOP - ((i + 1) * 4096);
+        vmm_map_page(pml4_virt, page_vaddr, get_phys_addr(stack_page), 0x7);
+    }
+
+    uint64_t user_stack_top = USER_STACK_TOP;
+
+    
+    // 8. Create Task Structure (Same as before)
+    task_t* new_task = (task_t*)kmalloc(sizeof(task_t));
+    new_task->pid = 2; // In a real OS, use an atomic counter or bitmap allocator
+    new_task->cr3 = (uint64_t)pml4_phys;
+    new_task->kernel_stack = (uint64_t)kmalloc(4096) + 4096;
+    new_task->next = NULL;
+
+    // If the task will be launched as a window manager, map framebuffer to userspace
+    if (is_wm) {
+        uint64_t fb_phys = get_phys_addr(framebuffer->address);
+
+        for (uint64_t offset = 0; offset < fb_size(); offset += PAGE_SIZE) {
+            vmm_map_page(pml4_virt, USER_FB_BASE + offset, fb_phys + offset, VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_PCD | VMM_PWT);
+        }
+
+
+        new_task->is_wm = 1;
+    }
+
+    // 9. Forge the Interrupt Stack Frame
+    uint64_t* sp = (uint64_t*)new_task->kernel_stack;
+    
+    sp--; *sp = 0x23;               // SS
+    sp--; *sp = user_stack_top;     // RSP
+    sp--; *sp = 0x202;              // RFLAGS
+    sp--; *sp = 0x1B;               // CS
+    sp--; *sp = header.e_entry;     // RIP (Note: used .e_entry not ->e_entry)
+
+    for (int i=0; i<15; i++) { sp--; *sp = 0; }
+    
+    new_task->rsp = (uint64_t)sp;
+    
+    // Add to scheduler
+    extern task_t* task_head;
+    task_t* next = task_head->next;
+    task_head->next = new_task;
+    new_task->next = next;
+    
+    serial_printf("Process loaded from %s! Entry: 0x%x\n", filename, header.e_entry);
 }
 
 void task_exit(void) {

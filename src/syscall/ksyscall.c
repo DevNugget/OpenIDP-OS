@@ -1,18 +1,17 @@
 #include <ksyscall.h>
 
 extern struct limine_framebuffer* framebuffer;
+extern task_t* current_task;
+extern uint64_t limine_hhdm;
 
 // Helper to write to serial console
-void sys_write(int fd, const char* buf, uint64_t count) {
+void sys_write(int fd, const char* buf) {
     // In a real OS, check 'fd' (1 = stdout) and verify 'buf' is in user memory.
     // For now, we trust the user pointer (DANGEROUS but simple for hobby OS)
     // We assume the buffer is a string, but we should strictly print 'count' bytes.
     
     (void)fd; // Unused for now, always write to COM1
-    
-    for (uint64_t i = 0; i < count; i++) {
-        serial_write_char(buf[i]);
-    }
+    serial_printf(buf);
 }
 
 void sys_exit(int code) {
@@ -93,6 +92,70 @@ void sys_blit(uint32_t* user_buffer) {
     }
 }
 
+void sys_exec(const char* path) {
+    FIL file;
+    FRESULT res = f_open(&file, path, FA_READ);
+    if (res != FR_OK) {
+        serial_printf("Exec failed: Could not open %s\n", path);
+        return;
+    }
+
+    uint64_t size = f_size(&file);
+    void* buffer = kmalloc(size);
+    UINT bytes_read;
+    
+    f_read(&file, buffer, size, &bytes_read);
+    f_close(&file);
+
+    // This creates a NEW task. The current task continues running (the shell).
+    create_user_process(buffer); 
+    
+    // Note: In a real OS, we would free 'buffer' after the process is created,
+    // but your create_user_process copies data to new pages, so we can free it here.
+    kfree(buffer);
+}
+
+void sys_draw_string(char* c, int x, int y, int fg, int bg) {
+    // Uses the kernel's font renderer
+    fb_draw_string(c, x, y, fg, bg, USE_PSF2);
+}
+
+struct fb_info {
+    uint64_t fb_addr;
+    uint64_t fb_width;
+    uint64_t fb_height;
+    uint64_t fb_pitch;
+    uint64_t fb_bpp;
+};
+
+int sys_get_fb_info(struct fb_info* user_out) {
+    task_t* t = current_task;
+
+    if (!t->is_wm) {
+        return -1;
+    }
+
+    struct fb_info info;
+    info.fb_addr = USER_FB_BASE;
+    info.fb_width = fb_width();
+    info.fb_height = fb_height();
+    info.fb_pitch = fb_pitch();
+    info.fb_bpp = fb_bpp();
+
+    /*
+    serial_printf("Userout: %x\n", user_out);
+    uint64_t old_cr3 = read_cr3();
+    serial_printf("Old CR3: %x\n", old_cr3);
+    write_cr3((uint64_t)current_task->cr3);
+    serial_printf("PID: %x\n", current_task->pid);
+    serial_printf("New CR3: %x\n", current_task->cr3);
+    memcpy(user_out, &info, sizeof(info));
+    write_cr3(old_cr3);
+    */
+    memcpy(user_out, &info, sizeof(info));
+    return 0;
+}
+
 // This function is called from assembly
 // Returns: The value to be put in RAX (return value)
 uint64_t syscall_dispatcher(registers_t* regs) {
@@ -101,7 +164,7 @@ uint64_t syscall_dispatcher(registers_t* regs) {
     // SysV ABI for arguments: RDI, RSI, RDX, RCX, R8, R9
     switch (syscall_number) {
         case SYS_WRITE:
-            sys_write((int)regs->rdi, (const char*)regs->rsi, regs->rdx);
+            sys_write((int)regs->rdi, (const char*)regs->rsi);
             return regs->rdx; // Return bytes written
 
         case SYS_EXIT:
@@ -129,6 +192,17 @@ uint64_t syscall_dispatcher(registers_t* regs) {
             // RDI holds the pointer to the user's backbuffer
             sys_blit((uint32_t*)regs->rdi);
             return 0;
+
+        case SYS_DRAW_STRING: // SYS_DRAW_CHAR: rdi=char, rsi=x, rdx=y, rcx=fg, r8=bg
+             sys_draw_string((char*)regs->rdi, (int)regs->rsi, (int)regs->rdx, (int)regs->rcx, (int)regs->r8);
+             return 0;
+             
+        case SYS_EXEC: // SYS_EXEC: rdi=filename_ptr
+             sys_exec((const char*)regs->rdi);
+             return 0;
+
+        case SYS_GET_FB_INFO:
+            return sys_get_fb_info((struct fb_info*)regs->rdi);
 
         default:
             serial_printf("[KERNEL] Unknown Syscall: %d\n", syscall_number);

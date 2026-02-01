@@ -47,6 +47,14 @@ uint64_t fb_bpp() {
     return framebuffer->bpp;
 }
 
+uint64_t fb_size() {
+    return fb_pitch() * fb_height();
+}
+
+uint64_t fb_addr() {
+    return (uint64_t)&framebuffer->address;
+}
+
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
     // Calculate offset: (y * pitch) + (x * bytes_per_pixel)
     uint64_t offset = (y * fb_pitch()) + (x * (fb_bpp() / 8));

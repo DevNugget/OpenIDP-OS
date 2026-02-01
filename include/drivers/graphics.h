@@ -18,6 +18,8 @@ uint64_t fb_width();
 uint64_t fb_height();
 uint64_t fb_pitch();
 uint64_t fb_bpp();
+uint64_t fb_size();
+uint64_t fb_addr();
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color);
 void fb_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);

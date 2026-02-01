@@ -1,0 +1,45 @@
+#!/bin/bash
+
+gcc -c idpwm.c -o idpwm.o -ffreestanding -mno-red-zone -fno-stack-protector
+ld -T linker.ld -o idpwm.elf idpwm.o
+
+set -e
+
+DISK_IMAGE="$1"
+MOUNT_DIR="/tmp/qemu_mount"
+
+if [ -z "$DISK_IMAGE" ]; then
+    echo "Usage: $0 disk.img"
+    exit 1
+fi
+
+if [ ! -f "$DISK_IMAGE" ]; then
+    echo "Disk image '$DISK_IMAGE' not found!"
+    exit 1
+fi
+
+# Create temporary mount point
+mkdir -p "$MOUNT_DIR"
+
+# Mount the disk image (assuming ext2/3/4)
+sudo mount -o loop "$DISK_IMAGE" "$MOUNT_DIR"
+
+# Ensure /bin exists inside the image
+mkdir -p "$MOUNT_DIR/bin"
+
+# Copy all ELF files from current directory
+for elf_file in *.elf; do
+    if [ -f "$elf_file" ]; then
+        echo "Copying $elf_file -> /bin/"
+        sudo cp "$elf_file" "$MOUNT_DIR/bin/"
+    fi
+done
+
+# Sync and unmount
+sync
+sudo umount "$MOUNT_DIR"
+
+# Cleanup
+rmdir "$MOUNT_DIR"
+
+echo "All ELF files copied successfully."

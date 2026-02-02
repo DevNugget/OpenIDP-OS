@@ -29,6 +29,15 @@ static inline uint64_t virt_to_phys(void* virt) {
 // FIXED: Only allocates if table doesn't exist, assumes tables are accessible
 static uint64_t* get_or_alloc_table(uint64_t* table, size_t index) {
     if (table[index] & VMM_PRESENT) {
+        // --- THIS PART WAS MISSING IN YOUR FILE ---
+        // If the table exists but is marked Kernel-Only (no VMM_USER),
+        // we must add the VMM_USER flag. Otherwise, user programs cannot 
+        // access any pages inside this table range.
+        if (!(table[index] & VMM_USER)) {
+             table[index] |= VMM_USER;
+        }
+        // ------------------------------------------
+
         uint64_t phys_addr = table[index] & PAGE_ALIGN_MASK;
         return phys_to_virt(phys_addr);
     }
@@ -44,7 +53,6 @@ static uint64_t* get_or_alloc_table(uint64_t* table, size_t index) {
     uint64_t new_phys = virt_to_phys(new_table);
     
     // CHANGE IS HERE: Add VMM_USER (0x4)
-    // This allows children of this table to be User pages if they want to be.
     table[index] = new_phys | VMM_PRESENT | VMM_WRITE | VMM_USER;
     
     return (uint64_t*)new_table;

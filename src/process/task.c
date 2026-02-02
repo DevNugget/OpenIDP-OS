@@ -185,11 +185,8 @@ void create_user_process(void* elf_data) {
     new_task->rsp = (uint64_t)sp;
     
     // Add to scheduler
-    extern task_t* task_head;
-    // Simple insert at head (or end, depending on your pref)
-    task_t* next = task_head->next;
+    new_task->next = task_head->next;
     task_head->next = new_task;
-    new_task->next = next;
     
     serial_printf("Process loaded! Entry: 0x%x\n", header->e_entry);
 }
@@ -243,6 +240,8 @@ void create_user_process_from_file(const char* filename, int is_wm) {
     f_read(&file, phdr, ph_size, &bytes_read);
 
     // 6. Load Segments
+    uint64_t max_vaddr = 0; // Track the highest address
+
     for (int i = 0; i < header.e_phnum; i++) {
         if (phdr[i].p_type == PT_LOAD) {
             uint64_t filesz = phdr[i].p_filesz;
@@ -278,6 +277,11 @@ void create_user_process_from_file(const char* filename, int is_wm) {
                     f_read(&file, page_virt, copy_size, &bytes_read);
                 }
             }
+
+            uint64_t end_vaddr = phdr[i].p_vaddr + phdr[i].p_memsz;
+            if (end_vaddr > max_vaddr) {
+                max_vaddr = end_vaddr;
+            }
         }
     }
 
@@ -306,10 +310,11 @@ void create_user_process_from_file(const char* filename, int is_wm) {
     
     // 8. Create Task Structure (Same as before)
     task_t* new_task = (task_t*)kmalloc(sizeof(task_t));
-    new_task->pid = 2; // In a real OS, use an atomic counter or bitmap allocator
+    new_task->pid = next_pid++;
     new_task->cr3 = (uint64_t)pml4_phys;
     new_task->kernel_stack = (uint64_t)kmalloc(4096) + 4096;
     new_task->next = NULL;
+    new_task->program_break = (max_vaddr + 0xFFF) & ~0xFFF;
 
     // If the task will be launched as a window manager, map framebuffer to userspace
     if (is_wm) {
@@ -337,10 +342,8 @@ void create_user_process_from_file(const char* filename, int is_wm) {
     new_task->rsp = (uint64_t)sp;
     
     // Add to scheduler
-    extern task_t* task_head;
-    task_t* next = task_head->next;
+    new_task->next = task_head->next;
     task_head->next = new_task;
-    new_task->next = next;
     
     serial_printf("Process loaded from %s! Entry: 0x%x\n", filename, header.e_entry);
 }
@@ -387,6 +390,50 @@ void task_exit(void) {
     // 5. Jump to the new stack and restore registers
     // This function DOES NOT RETURN.
     exit_switch_to(current_task->rsp);
+}
+
+task_t* get_task_by_pid(uint64_t pid) {
+    task_t* curr = task_head;
+    do {
+        if (curr->pid == pid) return curr;
+        curr = curr->next;
+    } while (curr != task_head);
+    return NULL;
+}
+
+int sys_ipc_send(int dest_pid, int type, uint64_t d1, uint64_t d2, uint64_t d3) {
+    if (type == 200) { // MSG_WINDOW_CREATED
+        serial_printf("[KERNEL] IPC Send. d3 (Buffer Ptr) = 0x%x\n", d3);
+    }
+    task_t* target = get_task_by_pid(dest_pid);
+    if (!target) return -1;
+
+    if (target->msg_count >= MSG_QUEUE_SIZE) return -2; // Queue full
+
+    message_t* msg = &target->msgs[target->msg_tail];
+    msg->sender_pid = current_task->pid;
+    msg->type = type;
+    msg->data1 = d1;
+    msg->data2 = d2;
+    msg->data3 = d3;
+
+    target->msg_tail = (target->msg_tail + 1) % MSG_QUEUE_SIZE;
+    target->msg_count++;
+    
+    //serial_printf("IPC_SEND: %x, %x\n", current_task->pid, type);
+    return 0;
+}
+
+int sys_ipc_recv(message_t* out_msg) {
+    // If empty, return -1 (Non-blocking for now)
+    //serial_printf("IPC_RECV CURR PID: %x, %x\n", current_task->pid, current_task->msg_count);
+    if (current_task->msg_count == 0) return -1;
+
+    *out_msg = current_task->msgs[current_task->msg_head];
+    current_task->msg_head = (current_task->msg_head + 1) % MSG_QUEUE_SIZE;
+    current_task->msg_count--;
+    //serial_printf("IPC_RECV\n");
+    return 0;
 }
 
 // This is called by the timer handler

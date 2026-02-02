@@ -166,11 +166,10 @@ void kmain(void) {
    
    pit_init(50); // 50Hz context switching
    create_user_process_from_file("/bin/idpwm.elf", 1);
+   //create_user_process_from_file("/bin/terminal.elf", 0);
 
     // We are now the "idle" task (PID 0)
     while(1) {
-        serial_printf(".");
-        for(volatile int i=0; i<10000000; i++);
         asm("hlt");
     }
 

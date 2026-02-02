@@ -25,6 +25,16 @@ typedef struct {
     uint64_t rip, cs, rflags, rsp, ss;
 } __attribute__((packed)) registers_t;
 
+#define MSG_QUEUE_SIZE 16
+
+typedef struct {
+    int sender_pid;
+    int type;
+    uint64_t data1;
+    uint64_t data2;
+    uint64_t data3;
+} message_t;
+
 typedef struct task {
     uint64_t  rsp;          // The stack pointer we save/restore
     uint64_t  cr3;
@@ -33,6 +43,13 @@ typedef struct task {
     struct task* next;      // Linked list for Round Robin
 
     uint64_t is_wm;
+    uint64_t program_break;
+
+    message_t msgs[MSG_QUEUE_SIZE];
+    int msg_head;
+    int msg_tail;
+    int msg_count;
+    int waiting_for_msg;
 } task_t;
 
 void init_scheduler(void);
@@ -42,6 +59,10 @@ void create_user_process_from_file(const char* filename, int is_wm);
 uint64_t scheduler_schedule(uint64_t current_rsp);
 
 void copy_to_user_mem(uint64_t* user_pml4, uint64_t vaddr, void* data, uint64_t size);
+
+task_t* get_task_by_pid(uint64_t pid);
+int sys_ipc_send(int dest_pid, int type, uint64_t d1, uint64_t d2, uint64_t d3);
+int sys_ipc_recv(message_t* out_msg);
 
 void task_exit(void);
 

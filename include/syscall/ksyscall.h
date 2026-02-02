@@ -18,6 +18,10 @@
 #define SYS_DRAW_STRING 6
 #define SYS_EXEC 7
 #define SYS_GET_FB_INFO 8
+#define SYS_SBRK 9
+#define SYS_IPC_SEND 10
+#define SYS_IPC_RECV 11
+#define SYS_SHARE_MEM 12
 
 void syscall_init(void);
 uint64_t syscall_dispatcher(registers_t* regs);

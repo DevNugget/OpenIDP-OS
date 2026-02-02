@@ -1,6 +1,10 @@
 #ifndef _STDINT_H
 #define _STDINT_H
 
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
+
 /* Exact-width integer types */
 typedef signed char          int8_t;
 typedef unsigned char        uint8_t;

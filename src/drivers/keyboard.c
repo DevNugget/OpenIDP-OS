@@ -1,10 +1,18 @@
 #include <keyboard.h>
 
-static char keyboard_ring_buffer[KEYBOARD_RING_BUFFER_SIZE];
+// Change buffer to hold 16-bit values (ASCII + Flags)
+static uint16_t keyboard_ring_buffer[KEYBOARD_RING_BUFFER_SIZE];
 static volatile uint16_t kb_head = 0;
 static volatile uint16_t kb_tail = 0;
 
-static int shift_active = 0;
+// Modifier States
+static int mod_shift = 0;
+static int mod_ctrl  = 0;
+static int mod_alt   = 0;
+static int mod_super = 0;
+
+// Extended Scan Code State (0xE0 prefix)
+static int e0_prefix = 0;
 
 // Scan Code Set 1 (US QWERTY)
 // 0 means no ASCII representation (like Shift, Ctrl, F1, etc.)
@@ -31,68 +39,88 @@ void keyboard_init(void) {
     serial_printf("Keyboard driver installed (PIC 1 unmasked)\n");
 }
 
-void keyboard_buffer_write(char c) {
+void keyboard_buffer_write(uint16_t data) {
     uint16_t next_head = (kb_head + 1) % KEYBOARD_RING_BUFFER_SIZE;
-    
-    // If buffer is full, discard the character (or overwrite oldest)
     if (next_head != kb_tail) {
-        keyboard_ring_buffer[kb_head] = c;
+        keyboard_ring_buffer[kb_head] = data;
         kb_head = next_head;
     }
 }
 
-char keyboard_read_char(void) {
-    // If buffer is empty, return 0
+uint16_t keyboard_read_key(void) {
     if (kb_head == kb_tail) {
         return 0;
     }
     
-    char c = keyboard_ring_buffer[kb_tail];
+    uint16_t val = keyboard_ring_buffer[kb_tail];
     kb_tail = (kb_tail + 1) % KEYBOARD_RING_BUFFER_SIZE;
-    return c;
+    return val;
 }
 
 void keyboard_handler(void) {
-    // Read Status Register
     uint8_t status = inb(KEYBOARD_STATUS_PORT);
 
-    // Check if Output Buffer is full (Bit 0 set)
     if (status & 0x01) {
         uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
-        // Left Shift Press (0x2A) or Right Shift Press (0x36)
-        if (scancode == 0x2A || scancode == 0x36) {
-            shift_active = 1;
+        // 1. Handle Extended Byte (E0)
+        // Sent before Right-Ctrl, Right-Alt, Keypad, and Super keys
+        if (scancode == 0xE0) {
+            e0_prefix = 1;
             return;
         }
 
-        // Left Shift Release (0xAA) or Right Shift Release (0xB6)
-        // (Release code is Press Code | 0x80)
-        if (scancode == 0xAA || scancode == 0xB6) {
-            shift_active = 0;
-            return;
-        }
-        
-        // If the top bit is set (0x80), it's a "Key Release" event
-        if (scancode & 0x80) {
-            // For now, we ignore key releases (except for Shift/Ctrl logic later)
-        } else {
-            // It's a "Key Press"
+        // 2. Handle Modifiers (Press & Release)
+        // We use the e0_prefix to distinguish if needed, but 
+        // mainly to catch the Super key (0x5B).
+
+        // --- SHIFT ---
+        if (scancode == 0x2A || scancode == 0x36) { mod_shift = 1; e0_prefix = 0; return; }
+        if (scancode == 0xAA || scancode == 0xB6) { mod_shift = 0; e0_prefix = 0; return; }
+
+        // --- CTRL (0x1D) ---
+        if (scancode == 0x1D) { mod_ctrl = 1; e0_prefix = 0; return; }
+        if (scancode == 0x9D) { mod_ctrl = 0; e0_prefix = 0; return; }
+
+        // --- ALT (0x38) ---
+        if (scancode == 0x38) { mod_alt = 1; e0_prefix = 0; return; }
+        if (scancode == 0xB8) { mod_alt = 0; e0_prefix = 0; return; }
+
+        // --- SUPER / META (E0 5B) ---
+        if (e0_prefix && scancode == 0x5B) { mod_super = 1; e0_prefix = 0; return; }
+        if (e0_prefix && scancode == 0xDB) { mod_super = 0; e0_prefix = 0; return; }
+
+        // 3. Handle Regular Keys
+        if (!(scancode & 0x80)) { // If Press
+            // Prevent E0 prefix from messing up standard map lookups
+            // (e.g., E0 5B is Super, but 5B alone is '[')
+            if (e0_prefix) {
+                // If we are here, we got an E0 extended code that isn't a known modifier.
+                // For now, ignore extended keys (like Keypad Enter) to avoid garbage chars.
+                e0_prefix = 0;
+                return;
+            }
+
             if (scancode < 128 && scancode_map[scancode] != 0) {
-                char c = 0;
-
-                // Pick the map based on Shift state
-                if (shift_active) {
-                    c = scancode_map_shifted[scancode];
+                char ascii = 0;
+                if (mod_shift) {
+                    ascii = scancode_map_shifted[scancode];
                 } else {
-                    c = scancode_map[scancode];
+                    ascii = scancode_map[scancode];
                 }
 
-                keyboard_buffer_write(c);
-                
-                // Optional: Echo to serial for debugging
-                // serial_printf("%c", c); 
+                // Pack Modifier Flags + ASCII into 16 bits
+                uint16_t packet = ascii;
+                if (mod_shift) packet |= KEY_MOD_SHIFT;
+                if (mod_ctrl)  packet |= KEY_MOD_CTRL;
+                if (mod_alt)   packet |= KEY_MOD_ALT;
+                if (mod_super) packet |= KEY_MOD_SUPER;
+
+                keyboard_buffer_write(packet);
             }
         }
+        
+        // Reset prefix state for next interrupt
+        e0_prefix = 0;
     }
 }

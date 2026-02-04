@@ -22,6 +22,12 @@
 #define IDT_TRAP_GATE      (IDT_GATE_PRESENT | IDT_GATE_RING0 | IDT_GATE_TRAP)
 #define IDT_USER_INTERRUPT (IDT_GATE_PRESENT | IDT_GATE_RING3 | IDT_GATE_INTERRUPT)
 
+#define ISR_COUNT 32 // ISRs (0-31)
+#define IRQ_COUNT 16 // IRQs (32-47)
+
+#define IRQ_PIT      32
+#define IRQ_KEYBOARD 33
+
 typedef struct {
 	uint16_t    isr_low;      // The lower 16 bits of the ISR's address
 	uint16_t    kernel_cs;    // The GDT segment selector that the CPU will load into CS before calling the ISR
@@ -42,8 +48,6 @@ extern idt_entry_t idt[IDT_MAX_DESCRIPTORS]; // Create an array of IDT entries; 
 extern idtr_t idtr;
 
 extern void syscall_stub(void);
-
-void exception_handler(uint64_t vector, uint64_t error, uint64_t rip);
 
 void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags);
 void idt_init(void);

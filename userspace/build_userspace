@@ -4,7 +4,7 @@ gcc -c idpwm.c -o idpwm.o -ffreestanding -mno-red-zone -fno-stack-protector
 gcc -c libc/heap.c -o heap.o -ffreestanding -mno-red-zone -fno-stack-protector
 gcc -c terminal.c -o terminal.o -ffreestanding -mno-red-zone -fno-stack-protector
 ld -T linker.ld -o idpwm.elf idpwm.o heap.o
-ld -T linker.ld -o terminal.elf terminal.o
+ld -T linker.ld -o terminal.elf terminal.o heap.o
 
 set -e
 

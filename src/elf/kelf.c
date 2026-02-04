@@ -1,48 +1,149 @@
 #include <kelf.h>
 
-// Returns the Entry Point (RIP)
-uint64_t load_elf(uint64_t* pml4, void* elf_data) {
-    Elf64_Ehdr* header = (Elf64_Ehdr*)elf_data;
+extern uint64_t limine_hhdm;
 
-    if (header->e_ident[0] != 0x7F || header->e_ident[1] != 'E' || 
-        header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
-        return 0; // Not an ELF
+static int elf_verify_header(const Elf64_Ehdr* header);
+static int elf_read_header(FIL* file, Elf64_Ehdr* header);
+static Elf64_Phdr* elf_read_program_headers(FIL* file, const Elf64_Ehdr* header);
+static uint64_t elf_load_segments(FIL* file, 
+                                  uint64_t* pml4_virt, 
+                                  const Elf64_Ehdr* header, 
+                                  Elf64_Phdr* phdr);
+
+static inline uint64_t get_phys_addr(void* addr) {
+    return (uint64_t)addr - limine_hhdm;
+}
+
+void load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t* out) {
+    FIL file;
+
+    if (f_open(&file, filename, FA_READ) != FR_OK) {
+        serial_printf("Failed to open file: %s\n", filename);
+        return;
     }
 
-    Elf64_Phdr* phdr = (Elf64_Phdr*)(elf_data + header->e_phoff);
+    Elf64_Ehdr header;
+    if (!elf_read_header(&file, &header)) {
+        f_close(&file);
+        return;
+    }
+
+    Elf64_Phdr* phdrs = elf_read_program_headers(&file, &header);
+    if (!phdrs) {
+        f_close(&file);
+        return;
+    }
+
+    uint64_t max_vaddr = elf_load_segments(&file, pml4_virt, &header, phdrs);
+
+    kfree(phdrs);
+    f_close(&file);
+
+    if (!out) {
+        serial_printf("Elf loader error: out parameter is NULL\n");
+        return;
+    }
+
+    out->entry = header.e_entry;
+    out->program_break = (max_vaddr + 0xFFF) & ~0xFFF;
+}
+
+static int elf_verify_header(const Elf64_Ehdr* header) {
+    return (header->e_ident[0] == 0x7F && 
+            header->e_ident[1] == 'E'  && 
+            header->e_ident[2] == 'L'  && 
+            header->e_ident[3] == 'F');
+}
+
+static int elf_read_header(FIL* file, Elf64_Ehdr* header) {
+    UINT bytes_read;
+    FRESULT res = f_read(file, header, sizeof(Elf64_Ehdr), &bytes_read);
+
+    if (res != FR_OK || bytes_read != sizeof(Elf64_Ehdr)) {
+        serial_printf("Failed to read ELF header\n");
+        f_close(file);
+        return 0;
+    }
+
+    // Verify ELF magic
+    if (!elf_verify_header(header)) {
+        serial_printf("Invalid ELF Magic in file\n");
+        f_close(file);
+        return 0;
+    }
+
+    return 1;
+}
+
+static Elf64_Phdr* elf_read_program_headers(FIL* file, const Elf64_Ehdr* header) {
+    UINT bytes_read;
+    uint32_t ph_size = header->e_phnum * sizeof(Elf64_Phdr);
+    Elf64_Phdr* phdr = (Elf64_Phdr*)kmalloc(ph_size);
+
+    if (!phdr) {
+        serial_printf("Failed to allocate program headers!\n");
+        return NULL;
+    }
+    
+    // Seek to the program header table in the file
+    f_lseek(file, header->e_phoff);
+    f_read(file, phdr, ph_size, &bytes_read);
+
+    if (bytes_read != ph_size) {
+        serial_printf("Failed to read program headers!\n");
+        kfree(phdr);
+        return NULL;
+    }
+
+    return phdr;
+}
+
+static uint64_t elf_load_segments(FIL* file, 
+                                  uint64_t* pml4_virt, 
+                                  const Elf64_Ehdr* header, 
+                                  Elf64_Phdr* phdr) {
+    UINT bytes_read;
+
+    uint64_t max_vaddr = 0;
 
     for (int i = 0; i < header->e_phnum; i++) {
-        if (phdr[i].p_type == PT_LOAD) {
-            // We need to map pages for this segment
-            uint64_t vaddr = phdr[i].p_vaddr;
-            uint64_t memsz = phdr[i].p_memsz;
-            uint64_t filesz = phdr[i].p_filesz;
-            uint64_t file_offset = phdr[i].p_offset;
-            
-            // Calculate how many pages we need
-            uint64_t num_pages = (memsz + 0xFFF) / 4096;
-            
-            // Allocate and map these pages in the USER PML4
-            for (uint64_t j = 0; j < num_pages; j++) {
-                void* phys = pmm_alloc_page();
-                // Map with USER + WRITE + PRESENT flags (0x07)
-                vmm_map_page(pml4, vaddr + (j * 4096), (uint64_t)phys, 0x07);
-            }
+        if (phdr[i].p_type != PT_LOAD) { continue; }
 
-            // Now we need to copy the data.
-            // PROBLEM: We are currently in Kernel PML4, we can't write to 'vaddr' directly 
-            // if it belongs to the user PML4 we are building.
-            // FIX: Temporarily switch CR3 or map the physical pages to a temporary kernel address.
-            // (Simplest for now: Switch CR3, copy, Switch back)
+        uint64_t filesz = phdr[i].p_filesz;
+        uint64_t memsz = phdr[i].p_memsz;
+        uint64_t vaddr = phdr[i].p_vaddr;
+        uint64_t file_offset = phdr[i].p_offset;
+
+        uint64_t pages_needed = (memsz + 0xFFF) / PAGE_SIZE;
+        
+        for (uint64_t page_index = 0; page_index < pages_needed; page_index++) {
+            uint64_t offset = page_index * PAGE_SIZE;
             
-            uint64_t old_cr3 = read_cr3();
-            write_cr3((uint64_t)pml4); // Switch to new process memory
+            void* page_virt = pmm_alloc_page();
+            uint64_t page_phys = get_phys_addr(page_virt);
             
-            memset((void*)vaddr, 0, memsz); // Zero out BSS
-            memcpy((void*)vaddr, elf_data + file_offset, filesz); // Copy code/data
+            vmm_map_page(pml4_virt, 
+                         vaddr + offset, 
+                         page_phys, 
+                         VMM_USER | VMM_WRITE | VMM_PRESENT);
             
-            write_cr3(old_cr3); // Switch back
+            memset(page_virt, 0, PAGE_SIZE);
+
+            if (offset < filesz) {
+                uint64_t bytes_to_copy = filesz - offset;
+                if (bytes_to_copy > PAGE_SIZE) bytes_to_copy = PAGE_SIZE;
+                
+                f_lseek(file, file_offset + offset);
+                
+                f_read(file, page_virt, bytes_to_copy, &bytes_read);
+            }
+        }
+
+        uint64_t segment_end = phdr[i].p_vaddr + phdr[i].p_memsz;
+        if (segment_end > max_vaddr) {
+            max_vaddr = segment_end;
         }
     }
-    return header->e_entry;
+
+    return max_vaddr;
 }

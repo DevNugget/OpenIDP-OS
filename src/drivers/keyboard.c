@@ -1,28 +1,22 @@
 #include <keyboard.h>
 
-// Change buffer to hold 16-bit values (ASCII + Flags)
 static uint16_t keyboard_ring_buffer[KEYBOARD_RING_BUFFER_SIZE];
 static volatile uint16_t kb_head = 0;
 static volatile uint16_t kb_tail = 0;
 
-// Modifier States
 static int mod_shift = 0;
 static int mod_ctrl  = 0;
 static int mod_alt   = 0;
 static int mod_super = 0;
 
-// Extended Scan Code State (0xE0 prefix)
-static int e0_prefix = 0;
+static int e0_prefix = 0; // Extended scan code state
 
-// Scan Code Set 1 (US QWERTY)
-// 0 means no ASCII representation (like Shift, Ctrl, F1, etc.)
 static char scancode_map[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
     '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
     0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 0,
     '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '*', 0, ' ',
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    // ... extended keys would go here (F-keys, Keypad) ...
 };
 
 static char scancode_map_shifted[128] = {
@@ -41,6 +35,7 @@ void keyboard_init(void) {
 
 void keyboard_buffer_write(uint16_t data) {
     uint16_t next_head = (kb_head + 1) % KEYBOARD_RING_BUFFER_SIZE;
+    
     if (next_head != kb_tail) {
         keyboard_ring_buffer[kb_head] = data;
         kb_head = next_head;
@@ -63,17 +58,14 @@ void keyboard_handler(void) {
     if (status & 0x01) {
         uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
-        // 1. Handle Extended Byte (E0)
+        // Handle Extended Byte (E0)
         // Sent before Right-Ctrl, Right-Alt, Keypad, and Super keys
         if (scancode == 0xE0) {
             e0_prefix = 1;
             return;
         }
 
-        // 2. Handle Modifiers (Press & Release)
-        // We use the e0_prefix to distinguish if needed, but 
-        // mainly to catch the Super key (0x5B).
-
+        // Handle Modifiers (Press & Release)
         // --- SHIFT ---
         if (scancode == 0x2A || scancode == 0x36) { mod_shift = 1; e0_prefix = 0; return; }
         if (scancode == 0xAA || scancode == 0xB6) { mod_shift = 0; e0_prefix = 0; return; }
@@ -90,7 +82,7 @@ void keyboard_handler(void) {
         if (e0_prefix && scancode == 0x5B) { mod_super = 1; e0_prefix = 0; return; }
         if (e0_prefix && scancode == 0xDB) { mod_super = 0; e0_prefix = 0; return; }
 
-        // 3. Handle Regular Keys
+        // Handle Regular Keys
         if (!(scancode & 0x80)) { // If Press
             // Prevent E0 prefix from messing up standard map lookups
             // (e.g., E0 5B is Super, but 5B alone is '[')

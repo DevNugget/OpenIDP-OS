@@ -1,8 +1,5 @@
 #include <pmm.h>
 
-#define PAGE_SIZE 4096
-#define BITS_PER_BYTE 8
-
 static uint8_t*  pmm_bitmap;
 static uint64_t  pmm_bitmap_phys;
 
@@ -33,6 +30,115 @@ static inline uint64_t align_up(uint64_t value, uint64_t alignment) {
 static inline uint64_t align_down(uint64_t value, uint64_t alignment) {
     return value & ~(alignment - 1);
 }
+
+static void count_total_pages(struct limine_memmap_response* memmap);
+static void place_bitmap(struct limine_memmap_response* memmap,
+                         struct limine_hhdm_response* hhdm);
+static void free_usable_pages(struct limine_memmap_response* memmap);
+static void lock_pages_range(uint64_t start_phys, uint64_t end_phys);
+static void lock_kernel_pages(struct limine_executable_address_response* kaddr);
+static void lock_bitmap_pages(void);
+
+void pmm_init(struct limine_memmap_response* memmap,
+              struct limine_executable_address_response* kernel,
+              struct limine_hhdm_response* hhdm) {
+
+    limine_hhdm = hhdm->offset;
+
+    count_total_pages(memmap);
+    place_bitmap(memmap, hhdm);
+
+    memset(pmm_bitmap, 0xFF, bitmap_size_bytes);
+    used_pages = total_pages;
+
+    free_usable_pages(memmap);
+    lock_kernel_pages(kernel);
+    lock_bitmap_pages();
+
+    serial_printf("PMM initialized: %u total, %u used, %u free\n",
+                  total_pages, used_pages, total_pages - used_pages);
+}
+
+
+/* Allocation functions */
+
+void* pmm_alloc_page() {
+    if (used_pages >= total_pages) return NULL;
+    
+    static uint64_t last_search_pos = 0;
+    uint64_t start_pos = last_search_pos;
+    
+    do {
+        if (!bitmap_test(last_search_pos)) {
+            bitmap_set(last_search_pos);
+            used_pages++;
+            return (void*)(last_search_pos * PAGE_SIZE + limine_hhdm);
+        }
+        
+        last_search_pos = (last_search_pos + 1) % total_pages;
+    } while (last_search_pos != start_pos);
+    
+    serial_printf("PMM WARNING: No free pages found despite availability check\n");
+    return NULL;
+}
+
+void pmm_free_page(void* addr) {
+    uint64_t phys = (uint64_t)addr - limine_hhdm;
+    uint64_t page = phys / PAGE_SIZE;
+    
+    if (!bitmap_test(page)) {
+        serial_printf("PMM WARNING: Double free detected at page %u\n", page);
+        return;
+    }
+    
+    bitmap_clear(page);
+    used_pages--;
+}
+
+void* pmm_alloc_pages(size_t count) {
+    if (count == 0 || used_pages + count > total_pages) return NULL;
+    
+    uint64_t consecutive = 0;
+    uint64_t start_page = 0;
+    
+    for (uint64_t i = 0; i < total_pages; i++) {
+        if (!bitmap_test(i)) {
+            if (consecutive == 0) start_page = i;
+            consecutive++;
+            
+            if (consecutive == count) {
+                for (uint64_t j = 0; j < count; j++) {
+                    bitmap_set(start_page + j);
+                }
+                used_pages += count;
+                return (void*)(start_page * PAGE_SIZE + limine_hhdm);
+            }
+        } else {
+            consecutive = 0;
+        }
+    }
+    
+    return NULL;
+}
+
+void pmm_free_pages(void* addr, size_t count) {
+    if (count == 0) return;
+    
+    uint64_t phys = (uint64_t)addr - limine_hhdm;
+    uint64_t start_page = phys / PAGE_SIZE;
+    
+    for (size_t i = 0; i < count; i++) {
+        uint64_t page = start_page + i;
+        if (bitmap_test(page)) {
+            bitmap_clear(page);
+            used_pages--;
+        } else {
+            serial_printf("PMM WARNING: Double free detected in batch at page %u\n", page);
+        }
+    }
+}
+
+/* Init helper functions */
 
 static void count_total_pages(struct limine_memmap_response* memmap) {
     total_pages = 0;
@@ -122,102 +228,3 @@ static void lock_bitmap_pages(void) {
                   bitmap_size_pages, pmm_bitmap_phys);
 }
 
-void pmm_init(struct limine_memmap_response* memmap,
-              struct limine_executable_address_response* kernel,
-              struct limine_hhdm_response* hhdm) {
-
-    limine_hhdm = hhdm->offset;
-
-    count_total_pages(memmap);
-    place_bitmap(memmap, hhdm);
-
-    memset(pmm_bitmap, 0xFF, bitmap_size_bytes);
-    used_pages = total_pages;
-
-    free_usable_pages(memmap);
-    lock_kernel_pages(kernel);
-    lock_bitmap_pages();
-
-    serial_printf("PMM initialized: %u total, %u used, %u free\n",
-                  total_pages, used_pages, total_pages - used_pages);
-}
-
-void* pmm_alloc_page() {
-    // Quick check for availability
-    if (used_pages >= total_pages) return NULL;
-    
-    // Search from last found position to avoid always starting from 0
-    static uint64_t last_search_pos = 0;
-    uint64_t start_pos = last_search_pos;
-    
-    do {
-        if (!bitmap_test(last_search_pos)) {
-            bitmap_set(last_search_pos);
-            used_pages++;
-            //serial_printf("PMM: Allocated page %u (used: %u/%u)\n",
-            //              last_search_pos, used_pages, total_pages);
-            return (void*)(last_search_pos * PAGE_SIZE + limine_hhdm);
-        }
-        
-        last_search_pos = (last_search_pos + 1) % total_pages;
-    } while (last_search_pos != start_pos);
-    
-    serial_printf("PMM WARNING: No free pages found despite availability check\n");
-    return NULL;
-}
-
-void pmm_free_page(void* addr) {
-    uint64_t phys = (uint64_t)addr - limine_hhdm;
-    uint64_t page = phys / PAGE_SIZE;
-    
-    if (!bitmap_test(page)) {
-        serial_printf("PMM WARNING: Double free detected at page %u\n", page);
-        return;
-    }
-    
-    bitmap_clear(page);
-    used_pages--;
-}
-
-void* pmm_alloc_pages(size_t count) {
-    if (count == 0 || used_pages + count > total_pages) return NULL;
-    
-    uint64_t consecutive = 0;
-    uint64_t start_page = 0;
-    
-    for (uint64_t i = 0; i < total_pages; i++) {
-        if (!bitmap_test(i)) {
-            if (consecutive == 0) start_page = i;
-            consecutive++;
-            
-            if (consecutive == count) {
-                for (uint64_t j = 0; j < count; j++) {
-                    bitmap_set(start_page + j);
-                }
-                used_pages += count;
-                return (void*)(start_page * PAGE_SIZE + limine_hhdm);
-            }
-        } else {
-            consecutive = 0;
-        }
-    }
-    
-    return NULL;
-}
-
-void pmm_free_pages(void* addr, size_t count) {
-    if (count == 0) return;
-    
-    uint64_t phys = (uint64_t)addr - limine_hhdm;
-    uint64_t start_page = phys / PAGE_SIZE;
-    
-    for (size_t i = 0; i < count; i++) {
-        uint64_t page = start_page + i;
-        if (bitmap_test(page)) {
-            bitmap_clear(page);
-            used_pages--;
-        } else {
-            serial_printf("PMM WARNING: Double free detected in batch at page %u\n", page);
-        }
-    }
-}

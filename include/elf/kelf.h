@@ -2,9 +2,20 @@
 #define ELF_H
 
 #include <stdint.h>
+#include <stddef.h>
+
 #include <vmm.h>
 #include <pmm.h>
+#include <kheap.h>
+
+#include <fatfs/ff.h>
+#include <com1.h>
 #include <kstring.h>
+
+#define PT_LOAD 1
+#define PF_X 1  // Executable
+#define PF_W 2  // Write
+#define PF_R 4  // Read
 
 typedef struct {
     unsigned char e_ident[16];
@@ -34,11 +45,11 @@ typedef struct {
     uint64_t   p_align;
 } Elf64_Phdr;
 
-#define PT_LOAD 1
-#define PF_X 1  // Executable
-#define PF_W 2  // Write
-#define PF_R 4  // Read
+typedef struct {
+    uint64_t entry;
+    uint64_t program_break;
+} elf_load_result_t;
 
-uint64_t load_elf(uint64_t* pml4, void* elf_data);
+void load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t* out);
 
 #endif

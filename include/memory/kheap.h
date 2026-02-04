@@ -15,7 +15,7 @@
 #define ALIGN_UP(x, a) (((x) + (a - 1)) & ~(a - 1))
 
 #define KHEAP_START 0xFFFF800000000000UL
-#define KHEAP_MAX   0xFFFF800100000000UL  // 256MB heap max for now
+#define KHEAP_MAX   0xFFFF800100000000UL  // 256MB max 
 
 void heap_init(void);
 

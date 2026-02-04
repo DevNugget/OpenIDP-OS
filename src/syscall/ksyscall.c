@@ -1,3 +1,7 @@
+/* 
+TODO: Clean up this mess of a file.
+*/
+
 #include <ksyscall.h>
 
 extern struct limine_framebuffer* framebuffer;
@@ -26,26 +30,20 @@ void sys_exit(int code) {
 }
 
 uint64_t sys_read_key() {
-    uint64_t val = 0;
-    while (1) {
-        // 1. NON-BLOCKING CHECK:
-        // If the current task has pending messages, return 0 immediately.
-        if (current_task->msg_count > 0) {
-            return 0;
-        }
-
-        // 2. Standard Keyboard Check
-        asm volatile("cli");
-        val = keyboard_read_key();
-
-        if (val != 0) {
-            asm volatile("sti");
-            return val;
-        }
-
-        // 3. Sleep until interrupt
-        asm volatile("sti; hlt");
+    // Optimization: This function is now strictly NON-BLOCKING.
+    // It is up to the user program to yield/sleep if it has nothing to do.
+    
+    // 1. Check current task messages first (Priority to IPC)
+    if (current_task->msg_count > 0) {
+        return 0;
     }
+
+    // 2. Check Hardware Keyboard Buffer
+    asm volatile("cli");
+    uint64_t val = keyboard_read_key(); // This must be non-blocking in your driver
+    asm volatile("sti");
+
+    return val;
 }
 
 // Helper for Screen Properties
@@ -56,48 +54,9 @@ uint64_t sys_get_screen_prop(uint64_t prop_id) {
     return 0;
 }
 
-// Helper for Drawing
-void sys_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-    // In a real OS, you would clamp these values to screen bounds here
-    fb_draw_filled_rect(x, y, w, h, color);
-}
-
-void sys_blit(uint32_t* user_buffer) {
-    if (!framebuffer) return;
-
-    uint64_t width = framebuffer->width;
-    uint64_t height = framebuffer->height;
-    uint64_t pitch = framebuffer->pitch;
-    uint8_t* vram = (uint8_t*)framebuffer->address;
-    
-    // User buffer is assumed to be tightly packed (Width * 4 bytes per row)
-    // VRAM might have padding (Pitch)
-    
-    // Optimization: If no padding, copy everything at once
-    if (pitch == width * 4) {
-        memcpy(vram, user_buffer, width * height * 4);
-    } else {
-        // Copy row by row
-        for (uint64_t y = 0; y < height; y++) {
-            // Dest: vram + (y * pitch)
-            // Src:  user_buffer + (y * width)
-            // Size: width * 4 bytes
-            memcpy(
-                vram + (y * pitch), 
-                user_buffer + (y * width), 
-                width * 4
-            );
-        }
-    }
-}
-
 void sys_exec(const char* path) {
+    serial_printf("SYS_EXEC_PATH: %s\n", path);
     create_user_process_from_file(path, 0);
-}
-
-void sys_draw_string(char* c, int x, int y, int fg, int bg) {
-    // Uses the kernel's font renderer
-    fb_draw_string(c, x, y, fg, bg, USE_PSF2);
 }
 
 struct fb_info {
@@ -122,21 +81,10 @@ int sys_get_fb_info(struct fb_info* user_out) {
     info.fb_pitch = fb_pitch();
     info.fb_bpp = fb_bpp();
 
-    /*
-    serial_printf("Userout: %x\n", user_out);
-    uint64_t old_cr3 = read_cr3();
-    serial_printf("Old CR3: %x\n", old_cr3);
-    write_cr3((uint64_t)current_task->cr3);
-    serial_printf("PID: %x\n", current_task->pid);
-    serial_printf("New CR3: %x\n", current_task->cr3);
-    memcpy(user_out, &info, sizeof(info));
-    write_cr3(old_cr3);
-    */
     memcpy(user_out, &info, sizeof(info));
     return 0;
 }
 
-// inc: Amount to increase heap (in bytes). If 0, just return current break.
 void* sys_sbrk(intptr_t inc) {
     task_t* task = current_task;
     uint64_t old_break = task->program_break;
@@ -244,6 +192,82 @@ uint64_t sys_share_mem(int target_pid, size_t size, uint64_t* target_vaddr_out) 
     return my_vaddr;
 }
 
+int64_t sys_file_read(const char* path, void* user_buf, uint64_t max_len) {
+    FIL file;
+    FRESULT res;
+    UINT bytes_read;
+
+    // 1. Open File
+    res = f_open(&file, path, FA_READ);
+    if (res != FR_OK) return -1;
+
+    // 2. Check Size
+    uint64_t fsize = f_size(&file);
+    if (fsize > max_len) fsize = max_len;
+
+    // 3. Read
+    // Note: In a real OS, verify user_buf is valid user memory!
+    res = f_read(&file, user_buf, fsize, &bytes_read);
+    f_close(&file);
+
+    if (res != FR_OK) return -1;
+    return bytes_read;
+}
+
+static inline void invlpg(void* m) {
+    asm volatile("invlpg (%0)" :: "r"(m) : "memory");
+}
+
+int sys_unmap(void* vaddr_ptr, size_t size) {
+    uint64_t vaddr = (uint64_t)vaddr_ptr;
+    
+    // 1. Align to page boundaries
+    size = ALIGN_UP(size, PAGE_SIZE);
+    
+    // 2. Get the Virtual Address of the current PML4
+    // (cr3 is physical, we need HHDM virtual to read/write it)
+    uint64_t* pml4 = (uint64_t*)phys_to_virt(current_task->cr3);
+
+    for (uint64_t i = 0; i < size; i += PAGE_SIZE) {
+        uint64_t curr_vaddr = vaddr + i;
+        
+        // --- Manual Page Table Walk ---
+        // We do this manually to ensure we catch missing tables
+        
+        uint64_t pml4i = PML4_INDEX(curr_vaddr);
+        if (!(pml4[pml4i] & 0x1)) continue; // Not present
+        
+        uint64_t* pdp = (uint64_t*)phys_to_virt(pml4[pml4i] & PAGE_ALIGN_MASK);
+        uint64_t pdpi = PDPT_INDEX(curr_vaddr);
+        if (!(pdp[pdpi] & 0x1)) continue;
+
+        uint64_t* pd = (uint64_t*)phys_to_virt(pdp[pdpi] & PAGE_ALIGN_MASK);
+        uint64_t pdi = PD_INDEX(curr_vaddr);
+        if (!(pd[pdi] & 0x1)) continue;
+
+        uint64_t* pt = (uint64_t*)phys_to_virt(pd[pdi] & PAGE_ALIGN_MASK);
+        uint64_t pti = PT_INDEX(curr_vaddr);
+        
+        if (pt[pti] & 0x1) {
+            // 3. Found the page!
+            uint64_t phys_addr = pt[pti] & PAGE_ALIGN_MASK;
+            
+            // A. Clear the entry (Unmap)
+            pt[pti] = 0;
+            
+            // B. Invalidate TLB for this address
+            invlpg((void*)curr_vaddr);
+            
+            // C. Free the Physical Memory
+            // NOTE: This assumes the other process (the client) is dead or 
+            // you don't care if it crashes. Given your current architecture, 
+            // this is the correct behavior for cleaning up window buffers.
+            //pmm_free_page((void*)phys_to_virt(phys_addr));
+        }
+    }
+    return 0;
+}
+
 // This function is called from assembly
 // Returns: The value to be put in RAX (return value)
 uint64_t syscall_dispatcher(registers_t* regs) {
@@ -260,32 +284,14 @@ uint64_t syscall_dispatcher(registers_t* regs) {
             return 0;
 
         case SYS_READ_KEY:
+            //serial_printf("SYSCALL NUM: %d\n", syscall_number);
             return sys_read_key();
 
         case SYS_GET_SCREEN_PROP:
             return sys_get_screen_prop(regs->rdi);
 
-        case SYS_DRAW_RECT:
-            // RDI=x, RSI=y, RDX=w, RCX=h, R8=color
-            sys_draw_rect(
-                (uint32_t)regs->rdi, 
-                (uint32_t)regs->rsi, 
-                (uint32_t)regs->rdx, 
-                (uint32_t)regs->rcx, 
-                (uint32_t)regs->r8
-            );
-            return 0;
-        
-        case SYS_BLIT:
-            // RDI holds the pointer to the user's backbuffer
-            sys_blit((uint32_t*)regs->rdi);
-            return 0;
-
-        case SYS_DRAW_STRING: // SYS_DRAW_CHAR: rdi=char, rsi=x, rdx=y, rcx=fg, r8=bg
-             sys_draw_string((char*)regs->rdi, (int)regs->rsi, (int)regs->rdx, (int)regs->rcx, (int)regs->r8);
-             return 0;
-             
         case SYS_EXEC: // SYS_EXEC: rdi=filename_ptr
+             serial_printf("SYSCALL NUM: %d\n", syscall_number);
              sys_exec((const char*)regs->rdi);
              return 0;
 
@@ -293,9 +299,11 @@ uint64_t syscall_dispatcher(registers_t* regs) {
             return sys_get_fb_info((struct fb_info*)regs->rdi);
 
         case SYS_SBRK:
+            serial_printf("SYSCALL NUM: %d\n", syscall_number);
             return (uint64_t)sys_sbrk((intptr_t)regs->rdi);
 
         case SYS_IPC_SEND:
+            //serial_printf("SYSCALL NUM: %d\n", syscall_number);
             // Arguments: RDI=dest_pid, RSI=type, RDX=d1, RCX=d2, R8=d3
             return sys_ipc_send(
                 (int)regs->rdi, 
@@ -306,16 +314,25 @@ uint64_t syscall_dispatcher(registers_t* regs) {
             );
 
         case SYS_IPC_RECV:
+            //serial_printf("SYSCALL NUM: %d\n", syscall_number);
             // Arguments: RDI = pointer to message_t struct in user memory
             return sys_ipc_recv((message_t*)regs->rdi);
 
         case SYS_SHARE_MEM:
+            serial_printf("SYSCALL NUM: %d\n", syscall_number);
             // Arguments: RDI=target_pid, RSI=size, RDX=pointer to output variable (target_vaddr)
             return sys_share_mem(
                 (int)regs->rdi,
                 (size_t)regs->rsi,
                 (uint64_t*)regs->rdx
             );
+
+        case SYS_FILE_READ:
+            serial_printf("SYSCALL NUM: %d\n", syscall_number);
+            return sys_file_read((const char*)regs->rdi, (void*)regs->rsi, regs->rdx);
+
+        case SYS_UNMAP:
+            return sys_unmap((void*)regs->rdi, (size_t)regs->rsi);
 
         default:
             serial_printf("[KERNEL] Unknown Syscall: %d\n", syscall_number);

@@ -12,6 +12,19 @@
 #define SYS_IPC_SEND 10
 #define SYS_IPC_RECV 11
 #define SYS_SHARE_MEM 12
+#define SYS_FILE_READ 13
+#define SYS_UNMAP 14
+
+#define MSG_REQUEST_WINDOW 100 
+
+// Messages TO Client
+#define MSG_WINDOW_CREATED 200 // d1=w, d2=h, d3=buffer_ptr
+#define MSG_WINDOW_RESIZE  201 // d1=w, d2=h
+
+// Common
+#define MSG_BUFFER_UPDATE  300
+#define MSG_KEY_EVENT 500
+#define MSG_QUIT_REQUEST  0xDEAD
 
 struct fb_info {
     uint64_t fb_addr;
@@ -135,6 +148,28 @@ static inline void* sys_share_mem(int target_pid, uint64_t size, uint64_t* targe
         "int $0x80"
         : "=a" (ret)
         : "a" (SYS_SHARE_MEM), "D" ((uint64_t)target_pid), "S" (size), "d" (target_vaddr_out)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int sys_file_read(const char* path, void* buf, uint64_t max_len) {
+    int ret;
+    asm volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYS_FILE_READ), "D" ((uint64_t)path), "S" ((uint64_t)buf), "d" (max_len)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline int sys_unmap(void* addr, uint64_t size) {
+    int ret;
+    asm volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (SYS_UNMAP), "D" ((uint64_t)addr), "S" (size)
         : "memory"
     );
     return ret;

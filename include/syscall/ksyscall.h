@@ -22,6 +22,8 @@
 #define SYS_IPC_SEND 10
 #define SYS_IPC_RECV 11
 #define SYS_SHARE_MEM 12
+#define SYS_FILE_READ 13
+#define SYS_UNMAP 14
 
 void syscall_init(void);
 uint64_t syscall_dispatcher(registers_t* regs);

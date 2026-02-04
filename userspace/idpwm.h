@@ -5,17 +5,6 @@
 
 #define MAX_WINDOWS 16
 
-// --- Protocol Definitions ---
-// Messages FROM Client
-#define MSG_REQUEST_WINDOW 100 
-
-// Messages TO Client
-#define MSG_WINDOW_CREATED 200 // d1=w, d2=h, d3=buffer_ptr
-#define MSG_WINDOW_RESIZE  201 // d1=w, d2=h
-
-// Common
-#define MSG_BUFFER_UPDATE  300
-
 struct fb_info framebuffer;
 
 // Window Structure

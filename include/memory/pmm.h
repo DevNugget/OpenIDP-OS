@@ -8,6 +8,7 @@
 #include <kstring.h>
 
 #define PAGE_SIZE 4096
+#define BITS_PER_BYTE 8
 
 void pmm_init(struct limine_memmap_response* memmap, 
     struct limine_executable_address_response* kernel_addr_request,

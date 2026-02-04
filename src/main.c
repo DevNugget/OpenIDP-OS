@@ -5,15 +5,22 @@
 #include <limine.h>
 #include <gdt.h>
 #include <idt.h>
+
 #include <pmm.h>
 #include <vmm.h>
 #include <kheap.h>
-#include <task.h>
+
 #include <pic.h>
 #include <com1.h>
+
+#include <task.h>
+
 #include <graphics.h>
 #include <keyboard.h>
 #include <fatfs/ff.h>
+
+#define PML4_ENTRY_COUNT 512
+#define PIT_FREQUENCY_HZ 200
 
 // Set the base revision to 4, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -51,8 +58,6 @@ static volatile struct limine_module_request module_request = {
     .revision = 0
 };
 
-uint64_t* kernel_pml4; // Global variable to hold the kernel's PML4 table
-
 // Finally, define the start and end markers for the Limine requests.
 // These can also be moved anywhere, to any .c file, as seen fit.
 
@@ -62,117 +67,68 @@ static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_
 __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
-// Halt and catch fire function.
-static void hcf(void) {
-    for (;;) {
-        asm ("hlt");
-    }
-}
+static void hcf(void) {for (;;) {asm ("hlt");}}
+static void system_init();
+static void copy_bootloader_pml4(uint64_t hhdm_offset);
+static void mount_filesystem();
 
-void task_a() {
-    while(1) {
-        serial_printf("A");
-        // Slow down so we don't spam serial too fast
-        for(volatile int i=0; i<10000000; i++); 
-    }
-}
-
-void task_b() {
-    while(1) {
-        serial_printf("B");
-        for(volatile int i=0; i<10000000; i++);
-    }
-}
-
+uint64_t* kernel_pml4;
 FATFS fat_fs;
 
-void mount_filesystem() {
+void kmain(void) {
+    // Ensure the bootloader actually understands our base revision (see spec).
+    if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
+        hcf();
+    }
+
+    system_init();
+
+    create_user_process_from_file("/bin/idpwm.elf", 1);
+
+    hcf();
+}
+
+static void system_init() {
+    struct limine_memmap_response* memmap = memmap_request.response;
+    struct limine_executable_address_response* kernel_addr = kernel_addr_request.response;
+    struct limine_hhdm_response* hhdm_response = hhdm_request.response;
+
+    serial_init();
+    gdt_init();
+    idt_init();
+    pmm_init(memmap, kernel_addr, hhdm_response);
+    
+    copy_bootloader_pml4(hhdm_response->offset);
+    vmm_switch_pml4(kernel_pml4);
+
+    heap_init();
+    keyboard_init();
+    mount_filesystem();
+    scheduler_init();
+    graphics_init();
+    pit_init(PIT_FREQUENCY_HZ);
+}
+
+static void copy_bootloader_pml4(uint64_t hhdm_offset) {
+    // Get current PML4 from bootloader
+    uint64_t boot_cr3 = read_cr3();
+    uint64_t* boot_pml4 = (uint64_t*)((boot_cr3 & PAGE_ALIGN_MASK) + hhdm_offset);
+    
+    kernel_pml4 = vmm_create_pml4();
+    
+    // Copy all existing mappings from bootloader's PML4
+    for (size_t i = 0; i < PML4_ENTRY_COUNT; i++) {
+        if (boot_pml4[i] & VMM_PRESENT) {
+            kernel_pml4[i] = boot_pml4[i];
+        }
+    }
+}
+
+static void mount_filesystem() {
     FRESULT res = f_mount(&fat_fs, "", 1); // 1 = mount now
     if (res != FR_OK) {
         serial_printf("Failed to mount filesystem\n");
         return;
     }
     serial_printf("Mounted filesystem\n");
-}
-
-static void install_drivers(struct limine_memmap_response* memmap,
-                             struct limine_executable_address_response* kernel_addr,
-                             struct limine_hhdm_response* hhdm_response) {
-    serial_init();
-    gdt_init();
-    idt_init();
-    
-    pmm_init(memmap, kernel_addr, hhdm_response);
-    
-    // Get current PML4 from bootloader
-    uint64_t boot_cr3 = read_cr3();
-    uint64_t* boot_pml4 = (uint64_t*)((boot_cr3 & PAGE_ALIGN_MASK) + hhdm_response->offset);
-    
-    kernel_pml4 = vmm_create_pml4();
-    
-    // CRITICAL: Copy all existing mappings from bootloader's PML4
-    // This includes HHDM region, kernel, and any other mappings
-    for (size_t i = 0; i < 512; i++) {
-        if (boot_pml4[i] & VMM_PRESENT) {
-            kernel_pml4[i] = boot_pml4[i];
-        }
-    }
-
-    serial_printf("About to switch CR3 to %x\n", kernel_pml4);
-    vmm_switch_pml4(kernel_pml4);
-
-    heap_init();
-    keyboard_init();
-    mount_filesystem();
-}
-
-
-// The following will be our kernel's entry point.
-// If renaming kmain() to something else, make sure to change the
-// linker script accordingly.
-void kmain(void) {
-    // Ensure the bootloader actually understands our base revision (see spec).
-    if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
-        hcf();
-    }
- 
-    // Get the responses from the requests we made earlier needed to install drivers.
-    struct limine_memmap_response* memmap = memmap_request.response;
-    struct limine_executable_address_response* kernel_addr = kernel_addr_request.response;
-    struct limine_hhdm_response* hhdm_response = hhdm_request.response;
-
-    install_drivers(memmap, kernel_addr, hhdm_response);
-
-    init_scheduler();
-
-    //create_kernel_task(task_a);
-    //create_kernel_task(task_b);
-    struct limine_module_response* modules = module_request.response;
-
-    graphics_init("/fonts/zap18.psf", "/fonts/zap24.psf");
-    /*
-    if (modules && modules->module_count > 0) {
-        struct limine_file* file = modules->modules[0];
-        serial_printf("Found module: %s\n", file->path);
-
-        create_user_process(file->address);
-    } else {
-        serial_printf("No modules found!\n");
-    }
-    */
-
-   
-   //fb_draw_string("Hello Graphical World!\nMultitasking Enabled.", 10, 10, 0xFFFFFF, 0x000000, USE_PSF2);
-   
-   pit_init(50); // 50Hz context switching
-   create_user_process_from_file("/bin/idpwm.elf", 1);
-   //create_user_process_from_file("/bin/terminal.elf", 0);
-
-    // We are now the "idle" task (PID 0)
-    while(1) {
-        asm("hlt");
-    }
-
-    // We're done, just hang...
-    hcf();
 }

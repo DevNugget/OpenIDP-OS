@@ -2,6 +2,8 @@
 
 extern uint64_t limine_hhdm;
 
+/* Helper functions */
+
 uint64_t read_cr3(void) {
     uint64_t val;
     asm volatile("mov %%cr3, %0" : "=r"(val));
@@ -16,27 +18,19 @@ static inline void invlpg(uint64_t virt) {
     asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
 }
 
-// Helper: Convert physical address to kernel virtual address
 static inline uint64_t* phys_to_virt(uint64_t phys) {
     return (uint64_t*)(phys + limine_hhdm);
 }
 
-// Helper: Convert kernel virtual address to physical
 static inline uint64_t virt_to_phys(void* virt) {
     return (uint64_t)virt - limine_hhdm;
 }
 
-// FIXED: Only allocates if table doesn't exist, assumes tables are accessible
 static uint64_t* get_or_alloc_table(uint64_t* table, size_t index) {
     if (table[index] & VMM_PRESENT) {
-        // --- THIS PART WAS MISSING IN YOUR FILE ---
-        // If the table exists but is marked Kernel-Only (no VMM_USER),
-        // we must add the VMM_USER flag. Otherwise, user programs cannot 
-        // access any pages inside this table range.
         if (!(table[index] & VMM_USER)) {
              table[index] |= VMM_USER;
         }
-        // ------------------------------------------
 
         uint64_t phys_addr = table[index] & PAGE_ALIGN_MASK;
         return phys_to_virt(phys_addr);
@@ -52,13 +46,11 @@ static uint64_t* get_or_alloc_table(uint64_t* table, size_t index) {
     
     uint64_t new_phys = virt_to_phys(new_table);
     
-    // CHANGE IS HERE: Add VMM_USER (0x4)
     table[index] = new_phys | VMM_PRESENT | VMM_WRITE | VMM_USER;
     
     return (uint64_t*)new_table;
 }
 
-// FIXED: Only traverses, doesn't allocate - returns NULL if table missing
 static uint64_t* get_table_noalloc(uint64_t* table, size_t index) {
     if (table[index] & VMM_PRESENT) {
         uint64_t phys_addr = table[index] & PAGE_ALIGN_MASK;
@@ -67,11 +59,9 @@ static uint64_t* get_table_noalloc(uint64_t* table, size_t index) {
     return NULL;
 }
 
-// FIXED: Maps a single 4KB page
+/* Allocation functions */
+
 void vmm_map_page(uint64_t* pml4, uint64_t virt, uint64_t phys, uint64_t flags) {
-    // IMPORTANT: pml4 must be in kernel's direct-mapped region
-    // (allocated via pmm_alloc_page which returns kernel virtual address)
-    
     uint64_t* pdpt = get_or_alloc_table(pml4, PML4_INDEX(virt));
     uint64_t* pd   = get_or_alloc_table(pdpt, PDPT_INDEX(virt));
     uint64_t* pt   = get_or_alloc_table(pd, PD_INDEX(virt));
@@ -84,9 +74,7 @@ void vmm_map_page(uint64_t* pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
     invlpg(virt);
 }
 
-// FIXED: Unmaps a page, doesn't allocate tables
 void vmm_unmap_page(uint64_t* pml4, uint64_t virt) {
-    // Traverse tables without allocating
     uint64_t* pdpt = get_table_noalloc(pml4, PML4_INDEX(virt));
     if (!pdpt) return;
     
@@ -101,13 +89,9 @@ void vmm_unmap_page(uint64_t* pml4, uint64_t virt) {
     if (pt[pt_index] & VMM_PRESENT) {
         pt[pt_index] = 0;
         invlpg(virt);
-        
-        // TODO: Consider freeing empty page tables here
-        // (Check if all entries in pt are zero, then free it, etc.)
     }
 }
 
-// FIXED: Gets physical address of mapping, doesn't allocate tables
 uint64_t vmm_get_mapping(uint64_t* pml4, uint64_t virt) {
     uint64_t* pdpt = get_table_noalloc(pml4, PML4_INDEX(virt));
     if (!pdpt) return 0;
@@ -124,7 +108,6 @@ uint64_t vmm_get_mapping(uint64_t* pml4, uint64_t virt) {
     return entry & PAGE_ALIGN_MASK;
 }
 
-// FIXED: Creates a new PML4 and maps it into kernel space
 uint64_t* vmm_create_pml4(void) {
     uint64_t* pml4 = pmm_alloc_page();
     if (!pml4) return NULL;
@@ -134,7 +117,6 @@ uint64_t* vmm_create_pml4(void) {
     return pml4;
 }
 
-// FIXED: Switch to new PML4
 void vmm_switch_pml4(uint64_t* pml4) {
     uint64_t phys = virt_to_phys(pml4);
     write_cr3(phys);

@@ -83,6 +83,7 @@ override CPPFLAGS := \
     -I src/process/ \
     -I src/elf/ \
     -I src/syscall/ \
+    -I src/faults/ \
 	-I include/ \
     -I include/descriptors/ \
     -I include/utility/ \
@@ -91,6 +92,7 @@ override CPPFLAGS := \
     -I include/process/ \
     -I include/elf/ \
     -I include/syscall/ \
+    -I include/faults/ \
     $(CPPFLAGS) \
     -MMD \
     -MP

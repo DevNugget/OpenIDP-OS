@@ -15,6 +15,10 @@
 #define USER_STACK_TOP 0x700000000  // Start of user stack region
 #define USER_FB_BASE 0x800000000ULL
 
+#define PTE_PRESENT 1
+#define PAGE_ADDR_MASK 0x000FFFFFFFFFF000
+#define HH_START 0xFFFF800000000000
+
 // This struct must exactly match the pushes in idt.asm
 typedef struct {
     // Pushed by our irq_stub (in reverse order of push)
@@ -36,11 +40,11 @@ typedef struct {
 } message_t;
 
 typedef struct task {
-    uint64_t  rsp;          // The stack pointer we save/restore
+    uint64_t  rsp;          
     uint64_t  cr3;
     uint64_t  pid;
     uint64_t  kernel_stack;
-    struct task* next;      // Linked list for Round Robin
+    struct task* next;      
 
     uint64_t is_wm;
     uint64_t program_break;
@@ -52,18 +56,17 @@ typedef struct task {
     int waiting_for_msg;
 } task_t;
 
-void init_scheduler(void);
-void create_kernel_task(void (*entry_point)());
-void create_user_process(void* elf_data);
-void create_user_process_from_file(const char* filename, int is_wm);
+void scheduler_init(void);
 uint64_t scheduler_schedule(uint64_t current_rsp);
 
-void copy_to_user_mem(uint64_t* user_pml4, uint64_t vaddr, void* data, uint64_t size);
+void create_kernel_task(void (*entry_point)());
+void create_user_process_from_file(const char* filename, int is_wm);
+void task_exit(void);
 
-task_t* get_task_by_pid(uint64_t pid);
 int sys_ipc_send(int dest_pid, int type, uint64_t d1, uint64_t d2, uint64_t d3);
 int sys_ipc_recv(message_t* out_msg);
 
-void task_exit(void);
+void copy_to_user_mem(uint64_t* user_pml4, uint64_t vaddr, void* data, uint64_t size);
+task_t* get_task_by_pid(uint64_t pid);
 
 #endif

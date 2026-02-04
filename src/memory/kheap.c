@@ -1,5 +1,8 @@
 #include <kheap.h>
 
+extern uint64_t* kernel_pml4;
+extern uint64_t limine_hhdm;
+
 typedef struct heap_block {
     uint64_t magic;
     size_t size;
@@ -13,14 +16,11 @@ static void split_block(heap_block_t* block, size_t size);
 static void coalesce(heap_block_t* block);
 static heap_block_t* get_last_block(void);
 
-extern uint64_t* kernel_pml4;
-extern uint64_t limine_hhdm;
-
 static heap_block_t* heap_head = NULL;
 static uint8_t* heap_end = (uint8_t*)KHEAP_START;
 
 void heap_init(void) {
-    // Start with 16KB heap
+    // Start with 16KB 
     heap_expand(PAGE_SIZE * 4);
 }
 
@@ -39,7 +39,6 @@ void* kmalloc(size_t size) {
         curr = curr->next;
     }
 
-    // No block found → expand heap
     size_t total = size + sizeof(heap_block_t);
     heap_expand(total);
 
@@ -54,7 +53,6 @@ void kfree(void* ptr) {
     heap_block_t* block = ((heap_block_t*)ptr) - 1;
 
     if (block->magic != HEAP_MAGIC) {
-        // Optional: panic("Heap corruption detected");
         return;
     }
 
@@ -85,10 +83,8 @@ void* krealloc(void* ptr, size_t size) {
     return newptr;
 }
 
-/*
-Internal helper functions
-*/
 
+// Helper functions
 static void heap_expand(size_t size) {
     size = ALIGN_UP(size, PAGE_SIZE);
 
@@ -97,8 +93,8 @@ static void heap_expand(size_t size) {
         vmm_map_page(kernel_pml4,
                      (uint64_t)heap_end,
                      phys,
-                     0x3); // PRESENT | WRITE
-        heap_end += PAGE_SIZE;
+                     VMM_PRESENT | VMM_WRITE);
+	heap_end += PAGE_SIZE;
     }
 
     heap_block_t* block = (heap_block_t*)(heap_end - size);

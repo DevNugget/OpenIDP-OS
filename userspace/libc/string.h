@@ -106,12 +106,92 @@ static inline int strcmp(const char *s1, const char *s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
+static inline int strncmp(const char *s1, const char *s2, int n) {
+    while (n--) {
+        unsigned char c1 = (unsigned char)*s1++;
+        unsigned char c2 = (unsigned char)*s2++;
+
+        if (c1 != c2)
+            return c1 - c2;
+
+        if (c1 == '\0')
+            return 0;
+    }
+    return 0;
+}
+
 static inline char *strchr(const char *s, int c) {
     while (*s) {
         if (*s == (char)c) return (char *)s;
         s++;
     }
     return (c == 0) ? (char *)s : NULL;
+}
+
+static inline char *strcat(char *dest, const char *src) {
+    char *d = dest;
+
+    // Find end of dest
+    while (*d) d++;
+
+    // Copy src (including null terminator)
+    while ((*d++ = *src++));
+
+    return dest;
+}
+
+static inline char *strtok(char *str, const char *delim) {
+    static char *next;
+    char *start;
+
+    // If new string provided, reset state
+    if (str)
+        next = str;
+
+    // No string to tokenize
+    if (!next)
+        return NULL;
+
+    // Skip leading delimiters
+    start = next;
+    while (*start && strchr(delim, *start))
+        start++;
+
+    // End of string reached
+    if (*start == '\0') {
+        next = NULL;
+        return NULL;
+    }
+
+    // Find end of token
+    char *end = start;
+    while (*end && !strchr(delim, *end))
+        end++;
+
+    // Null-terminate token and update state
+    if (*end) {
+        *end = '\0';
+        next = end + 1;
+    } else {
+        next = NULL;
+    }
+
+    return start;
+}
+
+static inline int tolower(int c) {
+    if (c >= 'A' && c <= 'Z')
+        return c + ('a' - 'A');
+    return c;
+}
+
+static inline void str_tolower(char *s) {
+    while (*s) {
+        if (*s >= 'A' && *s <= 'Z') {
+            *s = *s + ('a' - 'A');
+        }
+        s++;
+    }
 }
 
 #endif

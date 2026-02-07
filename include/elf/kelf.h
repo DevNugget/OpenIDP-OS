@@ -50,6 +50,6 @@ typedef struct {
     uint64_t program_break;
 } elf_load_result_t;
 
-void load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t* out);
+int load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t* out);
 
 #endif

@@ -7,7 +7,7 @@ extern uint64_t limine_hhdm;
 extern struct limine_framebuffer* framebuffer;
 
 void create_kernel_task(void (*entry_point)());
-void create_user_process_from_file(const char* filename, int is_wm);
+int create_user_process_from_file(const char* filename, int argc, char** argv, int is_wm);
 void task_exit(void);
 void free_page_table_level(uint64_t* table_virt, int level);
 void destroy_user_memory(uint64_t pml4_phys);
@@ -112,35 +112,79 @@ void create_kernel_task(void (*entry_point)()) {
     serial_printf("Task created: PID %d\n", new_task->pid);
 }
 
-void create_user_process_from_file(const char* filename, int is_wm) {
+int create_user_process_from_file(const char* filename, int argc, char** argv, int is_wm) {
     uint64_t* pml4_virt = pmm_alloc_page(); 
     uint64_t* pml4_phys = (uint64_t*)get_phys_addr(pml4_virt);
     
+    // Copy kernel mappings
     memset(pml4_virt, 0, 256 * sizeof(uint64_t));
     for (int i = 256; i < 512; i++) {
         pml4_virt[i] = kernel_pml4[i];
     }
 
     elf_load_result_t elf;
-    load_elf_file(filename, pml4_virt, &elf);
+    int load_err = load_elf_file(filename, pml4_virt, &elf);
+    if (load_err < 0) {
+        return -1;
+    }
 
-    // Allocate user stack 
+    /* Allocate user stack */
     size_t stack_pages = USER_STACK_SIZE / 4096;
     if (USER_STACK_SIZE % 4096 != 0) stack_pages++;
+
+    void* stack_page_virt = NULL;
 
     for (size_t i = 0; i < stack_pages; i++) {
         void* stack_page = pmm_alloc_page();
         if (!stack_page) {
             serial_printf("OOM during stack allocation\n");
-            return;
+            return -1;
         }
+
+        if (i == 0) stack_page_virt = stack_page;
+
         uint64_t page_vaddr = USER_STACK_TOP - ((i + 1) * 4096);
         vmm_map_page(pml4_virt, page_vaddr, get_phys_addr(stack_page), 0x7);
     }
 
-    uint64_t user_stack_top = USER_STACK_TOP;
-
+    //uint64_t user_stack_top = USER_STACK_TOP;
+    /* Allocate user stack END */
     
+    /* Argument passing */
+    intptr_t offset = 4096;
+    char* stack_base = (char*)stack_page_virt;
+
+    // Store USER virt addresses of strings we copy
+    uint64_t user_argv_addrs[32];
+
+    // Copy strings
+    for (int i = 0; i < argc; i++) {
+        int len = strlen(argv[i]) + 1; // +1 for NULL terminator
+        offset -= len;
+
+        strcpy(stack_base + offset, argv[i]);
+
+        user_argv_addrs[i] = USER_STACK_TOP - (4096 - offset);
+    }
+    // Align stack
+    offset -= (offset % 8);
+    // Make space for pointers
+    offset -= (argc + 1) * sizeof(uint64_t);
+
+    uint64_t* argv_ptr_array = (uint64_t*)(stack_base + offset);
+    for (int i = 0; i < argc; i++) {
+        argv_ptr_array[i] = user_argv_addrs[i];
+    }
+    argv_ptr_array[argc] = 0; // Add NULL terminator
+
+    // Calculate the final User Stack Pointer (RSP)
+    offset -= (offset % 16); // Align stack to 16 bytes
+    uint64_t final_user_rsp = USER_STACK_TOP - (4096 - offset);
+
+    uint64_t argv_user_addr = USER_STACK_TOP - (4096 - ((uint64_t)argv_ptr_array - (uint64_t)stack_base));
+
+    /* Argument passing END */
+
     // Create task struct 
     task_t* new_task = (task_t*)kmalloc(sizeof(task_t));
     memset(new_task, 0, sizeof(task_t));
@@ -150,6 +194,7 @@ void create_user_process_from_file(const char* filename, int is_wm) {
     new_task->kernel_stack = (uint64_t)kmalloc(4096*4) + 4096;
     if (!new_task->kernel_stack) {
         serial_printf("OOM when kernel stack\n");
+        return -1;
     }
 
     new_task->next = NULL;
@@ -175,12 +220,32 @@ void create_user_process_from_file(const char* filename, int is_wm) {
     uint64_t* sp = (uint64_t*)new_task->kernel_stack;
     
     sp--; *sp = 0x23;               // SS
-    sp--; *sp = user_stack_top;     // RSP
+    sp--; *sp = final_user_rsp;    // RSP
     sp--; *sp = 0x202;              // RFLAGS
     sp--; *sp = 0x1B;               // CS
-    sp--; *sp = elf.entry;     // RIP (Note: used .e_entry not ->e_entry)
+    sp--; *sp = elf.entry;          // RIP
 
-    for (int i=0; i<15; i++) { sp--; *sp = 0; }
+    //for (int i=0; i<15; i++) { sp--; *sp = 0; }
+    sp--; *sp = 0; // RAX
+    sp--; *sp = 0; // RBX
+    sp--; *sp = 0; // RCX
+    sp--; *sp = 0; // RDX
+    
+    // RSI holds argv
+    sp--; *sp = argv_user_addr; 
+    
+    // RDI holds argc
+    sp--; *sp = (uint64_t)argc; 
+    
+    sp--; *sp = 0; // RBP
+    sp--; *sp = 0; // R8
+    sp--; *sp = 0; // R9
+    sp--; *sp = 0; // R10
+    sp--; *sp = 0; // R11
+    sp--; *sp = 0; // R12
+    sp--; *sp = 0; // R13
+    sp--; *sp = 0; // R14
+    sp--; *sp = 0; // R15
     
     new_task->rsp = (uint64_t)sp;
     
@@ -189,6 +254,8 @@ void create_user_process_from_file(const char* filename, int is_wm) {
     task_head->next = new_task;
     
     serial_printf("Process loaded from %s! Entry: 0x%x\n", filename, elf.entry);
+
+    return new_task->pid;
 }
 
 /* Process freeing functions */
@@ -252,7 +319,6 @@ void free_page_table_level(uint64_t* table_virt, int level) {
             pmm_free_page((void*)child_virt); 
         }
 
-        // We have processed this child (or page). 
         // Now free the structure itself (The PT, PD, or PDP page)
         // We need to free the TABLE we just recursed into.
         if (level > 1) {
@@ -267,7 +333,7 @@ void free_page_table_level(uint64_t* table_virt, int level) {
 void destroy_user_memory(uint64_t pml4_phys) {
     uint64_t* pml4_virt = (uint64_t*)get_virt_addr(pml4_phys);
 
-    // ONLY clear the lower half (User Space: 0 to 255)
+    // NOTE: Only clear the lower half (User Space: 0 to 255)
     // Touching 256+ will unmap the kernel.
     for (int i = 0; i < 256; i++) {
         uint64_t entry = pml4_virt[i];
@@ -284,43 +350,6 @@ void destroy_user_memory(uint64_t pml4_phys) {
             pml4_virt[i] = 0;
         }
     }
-}
-
-/* Syscall functions */
-
-int sys_ipc_send(int dest_pid, int type, uint64_t d1, uint64_t d2, uint64_t d3) {
-    if (type == 200) { // MSG_WINDOW_CREATED
-        serial_printf("[KERNEL] IPC Send. d3 (Buffer Ptr) = 0x%x\n", d3);
-    }
-    task_t* target = get_task_by_pid(dest_pid);
-    if (!target) return -1;
-
-    if (target->msg_count >= MSG_QUEUE_SIZE) return -2; // Queue full
-
-    message_t* msg = &target->msgs[target->msg_tail];
-    msg->sender_pid = current_task->pid;
-    msg->type = type;
-    msg->data1 = d1;
-    msg->data2 = d2;
-    msg->data3 = d3;
-
-    target->msg_tail = (target->msg_tail + 1) % MSG_QUEUE_SIZE;
-    target->msg_count++;
-    
-    //serial_printf("IPC_SEND: %x, %x\n", current_task->pid, type);
-    return 0;
-}
-
-int sys_ipc_recv(message_t* out_msg) {
-    // If empty, return -1 
-    //serial_printf("IPC_RECV CURR PID: %x, %x\n", current_task->pid, current_task->msg_count);
-    if (current_task->msg_count == 0) return -1;
-
-    *out_msg = current_task->msgs[current_task->msg_head];
-    current_task->msg_head = (current_task->msg_head + 1) % MSG_QUEUE_SIZE;
-    current_task->msg_count--;
-    //serial_printf("IPC_RECV\n");
-    return 0;
 }
 
 /* Helper functions */

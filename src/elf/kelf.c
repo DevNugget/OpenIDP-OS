@@ -14,24 +14,24 @@ static inline uint64_t get_phys_addr(void* addr) {
     return (uint64_t)addr - limine_hhdm;
 }
 
-void load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t* out) {
+int load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t* out) {
     FIL file;
 
     if (f_open(&file, filename, FA_READ) != FR_OK) {
         serial_printf("Failed to open file: %s\n", filename);
-        return;
+        return -1;
     }
 
     Elf64_Ehdr header;
     if (!elf_read_header(&file, &header)) {
         f_close(&file);
-        return;
+        return -1;
     }
 
     Elf64_Phdr* phdrs = elf_read_program_headers(&file, &header);
     if (!phdrs) {
         f_close(&file);
-        return;
+        return -1;
     }
 
     uint64_t max_vaddr = elf_load_segments(&file, pml4_virt, &header, phdrs);
@@ -41,11 +41,12 @@ void load_elf_file(const char* filename, uint64_t* pml4_virt, elf_load_result_t*
 
     if (!out) {
         serial_printf("Elf loader error: out parameter is NULL\n");
-        return;
+        return -1;
     }
 
     out->entry = header.e_entry;
     out->program_break = (max_vaddr + 0xFFF) & ~0xFFF;
+    return 1;
 }
 
 static int elf_verify_header(const Elf64_Ehdr* header) {

@@ -20,7 +20,7 @@
 #include <fatfs/ff.h>
 
 #define PML4_ENTRY_COUNT 512
-#define PIT_FREQUENCY_HZ 200
+#define PIT_FREQUENCY_HZ 500
 
 // Set the base revision to 4, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -83,7 +83,13 @@ void kmain(void) {
 
     system_init();
 
-    create_user_process_from_file("/bin/idpwm.elf", 1);
+    char* wm_argv[] = {
+        "/",                // argv[0]: CWD (Root)
+        "/bin/idpwm.elf",   // argv[1]: Program Name
+        NULL                // Null terminator
+    };
+    int wm_argc = 2;
+    create_user_process_from_file("/bin/idpwm.elf", wm_argc, wm_argv, 1);
 
     hcf();
 }

@@ -60,7 +60,7 @@ void scheduler_init(void);
 uint64_t scheduler_schedule(uint64_t current_rsp);
 
 void create_kernel_task(void (*entry_point)());
-void create_user_process_from_file(const char* filename, int is_wm);
+int create_user_process_from_file(const char* filename, int argc, char** argv, int is_wm);
 void task_exit(void);
 
 int sys_ipc_send(int dest_pid, int type, uint64_t d1, uint64_t d2, uint64_t d3);

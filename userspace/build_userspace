@@ -1,10 +1,22 @@
 #!/bin/bash
 
-gcc -c idpwm.c -o idpwm.o -ffreestanding -mno-red-zone -fno-stack-protector
 gcc -c libc/heap.c -o heap.o -ffreestanding -mno-red-zone -fno-stack-protector
-gcc -c terminal.c -o terminal.o -ffreestanding -mno-red-zone -fno-stack-protector
+gcc -c libc/stdio.c -o stdio.o -ffreestanding -mno-red-zone -fno-stack-protector
+gcc -c libgfx/gfx.c -o gfx.o -ffreestanding -mno-red-zone -fno-stack-protector
+
+gcc -c idpwm.c -o idpwm.o -ffreestanding -mno-red-zone -fno-stack-protector
+
+gcc -c terminal/term.c -o terminal_term.o -ffreestanding -mno-red-zone -fno-stack-protector
+gcc -c terminal/main.c -o terminal_main.o -ffreestanding -mno-red-zone -fno-stack-protector
+
+gcc -c shell/shell.c -o shell_shell.o -ffreestanding -mno-red-zone -fno-stack-protector
+
+gcc -c coreutils/ls.c -o coreutil_ls.o -ffreestanding -mno-red-zone -fno-stack-protector
+
 ld -T linker.ld -o idpwm.elf idpwm.o heap.o
-ld -T linker.ld -o terminal.elf terminal.o heap.o
+ld -T linker.ld -o idpterm.elf heap.o gfx.o terminal_term.o terminal_main.o
+ld -T linker.ld -o idpshell.elf shell_shell.o heap.o stdio.o
+ld -T linker.ld -o ls.elf coreutil_ls.o stdio.o
 
 set -e
 

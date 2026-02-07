@@ -1,3 +1,8 @@
+/*
+ * TODO: Refactor this mess of a file
+ * 
+ */
+
 #include "idpwm.h"
 #include "openidp.h"
 #include "libc/heap.h"
@@ -101,14 +106,24 @@ void wm_present_rect(int x, int y, int w, int h) {
 
 void fb_fill_rect(uint32_t* fb_ptr, int x, int y, int w, int h, uint32_t color) {
     if (w <= 0 || h <= 0) return;
+    
+    // Bounds Check
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
     if (x + w > framebuffer.fb_width) w = framebuffer.fb_width - x;
     if (y + h > framebuffer.fb_height) h = framebuffer.fb_height - y;
 
+    // Pre-calculate stride (pixels per row)
+    // Note: screen_pitch_bytes is usually (width * 4), but can be larger for alignment
+    int stride_pixels = screen_pitch_bytes / 4; 
+
     for (int yy = 0; yy < h; yy++) {
-        uint32_t *row = fb_ptr + (y + yy) * (screen_pitch_bytes / 4);
-        memset(row + x, color, w * 4); // *4 because memset takes bytes
+        uint32_t *row = fb_ptr + ((y + yy) * stride_pixels) + x;
+        
+        // Use a loop to set 32-bit values correctly
+        for (int xx = 0; xx < w; xx++) {
+            row[xx] = color;
+        }
     }
 }
 
@@ -288,7 +303,7 @@ void render_recursive(tree_node_t *node, uint32_t *fb) {
 
     if (node->is_leaf && node->win && node->win->alive) {
         window_t *win = node->win;
-        uint32_t border_col = (node == focused_node) ? 0xFF007ACC : 0xFF444444;
+        uint32_t border_col = (node == focused_node) ? 0xff585b70 : 0xff313244;
         fb_draw_border(fb, win->x, win->y, win->width, win->height, border_col, 4);
 
         int b = 4;
@@ -432,7 +447,16 @@ void wm_handle_input(uint16_t key_packet) {
     int is_alt = (key_packet & 0x0400); 
 
     if (is_alt) {
-        if (key_char == '\n') { sys_exec("/bin/terminal.elf"); return; }
+        if (key_char == '\n') {
+            char* term_argv[] = {
+                "/",                // argv[0]: CWD (Root)
+                "/bin/idpterm.elf",   // argv[1]: Program Name
+                NULL                // Null terminator
+            };
+            int term_argc = 2;
+            sys_exec("/bin/idpterm.elf", term_argc, term_argv); 
+            return; 
+        }
         if (key_char == 'h') { next_split_mode = SPLIT_H; return; }
         if (key_char == 'v') { next_split_mode = SPLIT_V; return; }
         if (key_char == '\t') { wm_focus_next(); wm_draw(); wm_present(); return; } 

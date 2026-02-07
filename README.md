@@ -1,7 +1,9 @@
 <img width="2405" height="1080" alt="image" src="https://github.com/user-attachments/assets/740c3eac-6dd4-46cc-be44-c96869cf933a" />
 
 # OpenIDP OS
-![GitHub repo size](https://img.shields.io/github/repo-size/DevNugget/%20OpenIDP-OS)
+![GitHub repo size](https://img.shields.io/github/repo-size/DevNugget/OpenIDP-OS?style=flat-square&labelColor=%2345475a&color=%231e66f5)
+![GitHub Repo stars](https://img.shields.io/github/stars/DevNugget/OpenIDP-OS?style=flat-square&labelColor=%2345475a&color=%238839ef)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/t/DevNugget/OpenIDP-OS?style=flat-square&labelColor=%2345475a&color=%237287fd)
 
 OpenIDP (Idiot's Dream Project) is a 64 bit hobby operating system developed in C, using the [Limine bootloader](https://github.com/limine-bootloader/limine).
 

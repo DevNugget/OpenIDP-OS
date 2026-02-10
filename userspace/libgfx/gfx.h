@@ -40,4 +40,6 @@ void gfx_rect(gfx_context_t* ctx, int x, int y, int w, int h, uint32_t color);
 int gfx_font_width(gfx_context_t* ctx);
 int gfx_font_height(gfx_context_t* ctx);
 
+void gfx_draw_image(gfx_context_t* ctx, int x, int y, void* img_data);
+
 #endif

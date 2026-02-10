@@ -8,7 +8,7 @@
 // Window manager PID is always 1 (Prone to change in the future)
 #define WM_PID 1 
 
-#define FONT_PATH "/fonts/mona.psf"
+#define FONT_PATH "/fonts/krypton.psf"
 
 static gfx_context_t gfx;
 static term_t term;

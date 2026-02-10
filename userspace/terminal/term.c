@@ -1,6 +1,7 @@
 #include "term.h"
 #include "../libc/string.h"
 #include "../libc/heap.h"
+#include "../openidp.h"
 
 #define DEFAULT_BG 0x00181825
 #define DEFAULT_FG 0x00bac2de
@@ -284,6 +285,28 @@ static void term_put_char(term_t* term, char c) {
     draw_cell(term, term->cursor_x, term->cursor_y);
 }
 
+static void* load_file_to_memory(const char* path) {
+    struct kstat stat;
+
+    int stat_err = sys_stat(path, &stat);
+    if (stat_err != 0 || stat.flags == 1 || stat.size == 0) {
+        return NULL;
+    }
+
+    uint8_t* buffer = malloc(stat.size); 
+    
+    if (!buffer) return NULL;
+
+    int64_t bytes_read = sys_file_read(path, buffer, stat.size);
+    
+    if (bytes_read != stat.size) { 
+        free(buffer); 
+        return NULL; 
+    }
+    
+    return buffer;
+}
+
 rect_t term_write(term_t* term, const char* str) {
     while (*str) {
         char c = *str++;
@@ -294,11 +317,57 @@ rect_t term_write(term_t* term, const char* str) {
                 term->ansi_state = ANSI_STATE_CSI;
                 term->ansi_param_count = 0;
                 term->ansi_params[0] = 0;
+            } else if (c == ']') { // OSC Trigger
+                term->ansi_state = ANSI_STATE_OSC;
+                term->osc_idx = 0;
+                memset(term->osc_buffer, 0, 128);
             } else {
                 // Invalid escape, fallback to print both
                 // (Very simplified, ideally you handle other ESC sequences)
                 term->ansi_state = ANSI_STATE_NORMAL;
                 term_put_char(term, c);
+            }
+            continue;
+        }
+
+        else if (term->ansi_state == ANSI_STATE_OSC) {
+            // OSC commands usually end with BEL (\x07) or ST (\x1b\)
+            // We will use BEL (\x07) for simplicity
+            if (c == '\x07') {
+                // Parse Buffer: "69;/path/to/img"
+                if (strncmp(term->osc_buffer, "69;", 3) == 0) {
+                    char* path = term->osc_buffer + 3;
+                    
+                    // NOTE: You need to expose load_file_to_memory from main.c 
+                    // or move it to a shared util.
+                    void* img_data = load_file_to_memory(path); 
+                    
+                    if (img_data) {
+                        // Calculate pixel position from cursor text grid
+                        int px = term->cursor_x * gfx_font_width(term->gfx);
+                        int py = term->cursor_y * gfx_font_height(term->gfx);
+                        
+                        gfx_draw_image(term->gfx, px, py, img_data);
+                        
+                        // IMPORTANT: Invalidate the area so Window Manager sees it
+                        // We cheat and mark the whole screen dirty or calculate rect
+                        // For now, let's just trigger a full update or large rect
+                        term->last_update.x = 0;
+                        term->last_update.y = 0;
+                        term->last_update.w = term->gfx->width;
+                        term->last_update.h = term->gfx->height;
+                        term->last_update.dirty = 1;
+
+                        free(img_data);
+                    }
+                }
+                term->ansi_state = ANSI_STATE_NORMAL;
+            } 
+            else {
+                // Accumulate path string
+                if (term->osc_idx < 127) {
+                    term->osc_buffer[term->osc_idx++] = c;
+                }
             }
             continue;
         }

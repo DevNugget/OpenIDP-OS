@@ -15,7 +15,8 @@ typedef struct {
 typedef enum {
     ANSI_STATE_NORMAL,
     ANSI_STATE_ESC,
-    ANSI_STATE_CSI // Control Sequence Introducer '['
+    ANSI_STATE_CSI, // Control Sequence Introducer '['
+    ANSI_STATE_OSC
 } ansi_state_t;
 
 // A single cell on screen
@@ -48,6 +49,9 @@ typedef struct {
     ansi_state_t ansi_state;
     int ansi_params[4];
     int ansi_param_count;
+
+    char osc_buffer[128]; // Buffer for file path
+    int osc_idx;
 } term_t;
 
 void term_init(term_t* term, gfx_context_t* gfx);

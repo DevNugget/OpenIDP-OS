@@ -1,4 +1,5 @@
 #include "gfx.h"
+#include "../idpimg/idpimg.h"
 #include "../libc/string.h"
 
 // Helper to check PSF2 magic
@@ -99,6 +100,54 @@ void gfx_draw_char(gfx_context_t* ctx, int x, int y, char c, uint32_t fg, uint32
 
             // Draw FG or BG
             pixel_ptr[col] = is_set ? fg : bg;
+        }
+    }
+}
+
+// Alpha Blending: (src * a + dst * (255-a)) / 255
+static inline uint32_t blend_pixel(uint32_t fg, uint32_t bg) {
+    uint32_t alpha = (fg >> 24) & 0xFF;
+    
+    if (alpha == 0) return bg;
+    if (alpha == 255) return fg;
+
+    uint32_t inv_alpha = 255 - alpha;
+
+    uint32_t r = (((fg >> 16) & 0xFF) * alpha + ((bg >> 16) & 0xFF) * inv_alpha) / 255;
+    uint32_t g = (((fg >> 8) & 0xFF) * alpha + ((bg >> 8) & 0xFF) * inv_alpha) / 255;
+    uint32_t b = ((fg & 0xFF) * alpha + (bg & 0xFF) * inv_alpha) / 255;
+
+    return 0xFF000000 | (r << 16) | (g << 8) | b;
+}
+
+void gfx_draw_image(gfx_context_t* ctx, int x, int y, void* img_data) {
+    idpimg_header_t* header = (idpimg_header_t*)img_data;
+
+    // Safety check
+    if (header->magic != IDPIMG_MAGIC) return;
+
+    uint32_t* pixels = (uint32_t*)(img_data + sizeof(idpimg_header_t));
+    
+    // Bounds clipping
+    int draw_w = header->width;
+    int draw_h = header->height;
+
+    if (x + draw_w > ctx->width) draw_w = ctx->width - x;
+    if (y + draw_h > ctx->height) draw_h = ctx->height - y;
+
+    if (draw_w <= 0 || draw_h <= 0) return;
+
+    for (int row = 0; row < draw_h; row++) {
+        uint32_t* fb_ptr = ctx->fb + ((y + row) * ctx->pitch) + x;
+        uint32_t* img_ptr = pixels + (row * header->width);
+
+        for (int col = 0; col < draw_w; col++) {
+            // Read source pixel
+            uint32_t src = img_ptr[col];
+            // Read destination (for blending)
+            uint32_t dst = fb_ptr[col];
+            
+            fb_ptr[col] = blend_pixel(src, dst);
         }
     }
 }

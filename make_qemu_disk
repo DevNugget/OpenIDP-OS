@@ -1,2 +1,0 @@
-qemu-img create -f raw disk.img 512M
-mkfs.vfat -F 32 disk.img

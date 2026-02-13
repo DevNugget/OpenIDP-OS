@@ -4,7 +4,10 @@
 #include <limine.h>
 
 #include <utility/port.h>
+#include <utility/hhdm.h>
 #include <drivers/com1.h>
+#include <drivers/acpi.h>
+#include <drivers/apic.h>
 #include <descriptors/gdt.h>
 #include <descriptors/idt.h>
 
@@ -108,8 +111,12 @@ void kmain(void) {
         hcf();
     }
     
+    serial_init();
     gdt_init();
     idt_init();
+    hhdm_request_offset();
+    acpi_init();
+    apic_init();
     
     // Ensure we got a framebuffer.
     if (framebuffer_request.response == NULL
@@ -126,14 +133,11 @@ void kmain(void) {
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
     
-    serial_init();
     serial_write_str("Hello World!\n");
     serial_u64_dec(69420);
     serial_write_str("\n");
     serial_u64_hex(0xFFA);
-    
-    uint64_t* ptr = (uint64_t*)0xDEADBEEF;
-    *ptr = 10;
+    serial_write_str("\n");
     
     // We're done, just hang...
     hcf();

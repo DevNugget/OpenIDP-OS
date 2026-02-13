@@ -48,7 +48,7 @@ void gdt_init() {
     kernel_data |= GDT_S_CODE_DATA; 
     kernel_data |= GDT_DPL0; // Ring 0
     kernel_data |= GDT_PRESENT; 
-    //kernel_data |= GDT_LONG_MODE; 
+    kernel_data |= GDT_LONG_MODE; 
     gdt_entries[2] = kernel_data << 32;
     
     /* USER CODE descriptor */

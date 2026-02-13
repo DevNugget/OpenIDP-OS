@@ -2,4 +2,4 @@
 
 #qemu-system-x86_64 -boot d -cdrom image.iso -hda disk.img -serial stdio -m 1G -device qemu-xhci
 
-qemu-system-x86_64 -boot d -cdrom image.iso -serial stdio -m 1G
+qemu-system-x86_64 -boot d -cdrom image.iso -serial stdio -m 1G -enable-kvm

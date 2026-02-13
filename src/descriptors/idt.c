@@ -38,13 +38,16 @@ void idt_init() {
     for (int i = 0; i < IDT_SIZE; i++)
         set_idt_entry(i, vector_0_handler + (i * DESCRIPTOR_BYTES), 0);
     
-    asm volatile ("sti");
+    //asm volatile ("sti");
 }
 
 cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
     switch (context->vector_number) {
         case 13: {
             serial_write_str("general protection fault.\n");
+            for (;;) {
+                asm ("hlt");
+            }
             break;
         }
         case 14: {
@@ -54,6 +57,12 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
             }
             break;
         }
+        
+        case 0xFF: {
+            serial_write_str("spurious interrupt.\n");
+            break;
+        }
+        
         default: {
             serial_write_str("unexpected interrupt.\n");
             break;

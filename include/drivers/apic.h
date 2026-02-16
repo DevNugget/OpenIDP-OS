@@ -4,6 +4,7 @@
 #define APIC_H
 
 #include <stdint.h>
+#include <utility/hhdm.h>
 
 /* APIC */
 #define IA32_APIC_BASE 0x1B
@@ -29,6 +30,7 @@ typedef union {
 } ia32_apic_base_t;
 
 void apic_init();
+void io_apic_init(phys_addr_t phys_addr);
 
 /* PIC 8259 ports & ICW */
 #define PIC_COMMAND_MASTER 0x20

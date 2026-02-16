@@ -9,5 +9,6 @@ int serial_init();
 void serial_write_str(char* str);
 void serial_u64_dec(uint64_t n);
 void serial_u64_hex(uint64_t n);
+void serial_printf(const char* fmt_str, ...);
 
 #endif //COM1_H

@@ -1,6 +1,8 @@
 #include <drivers/com1.h>
 #include <utility/port.h>
 
+#include <stdarg.h>
+
 #define PORT 0x3f8 // COM1
 
 /* https://wiki.osdev.org/Serial_Ports#Initialization */
@@ -84,4 +86,44 @@ void serial_u64_hex(uint64_t n) {
     }
     
     serial_write_str(n_str);
+}
+
+void serial_printf(const char* fmt_str, ...) {
+    va_list args;
+    va_start(args, fmt_str);
+
+    for (const char* chr = fmt_str; *chr != '\0'; chr++) {
+        if (*chr != '%') {
+            outportb(PORT, *chr);
+            continue;
+        }
+
+        chr++;
+        switch (*chr) {
+            case 'd':
+            case 'u': {
+                uint64_t n = va_arg(args, uint64_t);
+                if (n == 0) serial_write_str("0");
+                else serial_u64_dec(n);
+                break;
+            }
+            case 'x':
+            case 'p': {
+                uint64_t n = va_arg(args, uint64_t);
+                if (n == 0) serial_write_str("0");
+                else serial_u64_hex(n);
+                break;
+            }
+            case '%': {
+                outportb(PORT, '%');
+                break;
+            }
+            default: {
+                serial_write_str("[COM1](printf) Unknown specifier");
+                break;
+            }
+        }
+    }
+
+    va_end(args);
 }

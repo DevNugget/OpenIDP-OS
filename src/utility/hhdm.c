@@ -20,9 +20,7 @@ void hhdm_request_offset() {
         serial_write_str("[HHDM](request_offset) No offset response from Limine\n");
     }
     hhdm_offset = hhdm_request.response->offset;
-    serial_write_str("[HHDM](request_offset=0x");
-    serial_u64_hex(hhdm_offset);
-    serial_write_str(") Offset response from Limine OK\n");
+    serial_printf("[HHDM](request_offset=0x%x) Offset response from Limine OK\n", hhdm_offset);
 }
 
 void* phys_to_virt(uint64_t phys) {

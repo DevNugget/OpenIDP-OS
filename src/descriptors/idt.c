@@ -1,6 +1,8 @@
 #include <descriptors/idt.h>
 #include <descriptors/gdt.h>
 #include <drivers/com1.h>
+#include <drivers/apic.h>
+#include <drivers/keyboard.h>
 #include <utility/cpu_state.h>
 
 #define DESCRIPTOR_BYTES 16
@@ -38,7 +40,7 @@ void idt_init() {
     for (int i = 0; i < IDT_SIZE; i++)
         set_idt_entry(i, vector_0_handler + (i * DESCRIPTOR_BYTES), 0);
     
-    //asm volatile ("sti");
+    asm volatile ("sti");
 }
 
 cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
@@ -62,11 +64,23 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
             serial_write_str("spurious interrupt.\n");
             break;
         }
+
+        case 0x20: {
+            //serial_printf("apic timer fired!\n");
+            break;
+        }
+
+        case 0x21: {
+            keyboard_driver_irq_handler();
+            break;
+        }
         
         default: {
             serial_write_str("unexpected interrupt.\n");
             break;
         }
     }
+
+    if (context->vector_number >= 32) apic_eoi();
     return context;
 }

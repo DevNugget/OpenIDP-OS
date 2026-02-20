@@ -100,6 +100,11 @@ void serial_printf(const char* fmt_str, ...) {
 
         chr++;
         switch (*chr) {
+            case 'c': {
+                char c = (char)va_arg(args, int);
+                outportb(PORT, c);
+                break;
+            }
             case 'd':
             case 'u': {
                 uint64_t n = va_arg(args, uint64_t);

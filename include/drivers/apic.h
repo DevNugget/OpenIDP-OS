@@ -8,13 +8,20 @@
 
 /* APIC */
 #define IA32_APIC_BASE 0x1B
+#define LAPIC_EOI      0xB0
 
 // Local APIC register offsets
 #define SPURIOUS_OFFSET 0xF0
 #define EOI_OFFSET      0xB0
-#define TIMERLVT_OFFSET 0x320
+
+#define TIMER_LVT     0x320
+#define TIMER_INIT    0x380
+#define TIMER_CURR    0x390
+#define TIMER_DIV     0x3E0
+
 #define LAPIC_ID_OFFSET 0x20
 
+#define TIMER_VECTOR    0x20
 #define SPURIOUS_VECTOR 0xFF
 
 typedef union {
@@ -31,6 +38,9 @@ typedef union {
 
 void apic_init();
 void io_apic_init(phys_addr_t phys_addr);
+void io_apic_map_irq(uint8_t pin, uint8_t vector);
+void apic_timer_init(uint16_t hz);
+void apic_eoi();
 
 /* PIC 8259 ports & ICW */
 #define PIC_COMMAND_MASTER 0x20

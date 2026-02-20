@@ -45,6 +45,9 @@ static inline uint64_t pages_to_mib(uint64_t pages) {
     return pages >> 8;
 }
 
+uint64_t kernel_size;
+virt_addr_t kernel_virt_base;
+
 /* PMM */
 static virt_addr_t* bitmap;
 static uint64_t total_pages;
@@ -164,7 +167,8 @@ void pmm_init() {
     }
     serial_printf("[PMM](pmm_init) Locked bitmap pages.\n");
 
-    uint64_t kernel_size = executable_file_request.response->executable_file->size;
+    kernel_size = executable_file_request.response->executable_file->size;
+    kernel_virt_base = executable_address_request.response->virtual_base;
     uint64_t kernel_base = executable_address_request.response->physical_base;
     serial_printf("[PMM](pmm_init) Kernel base found at (PHYS)0x%x of (SIZE)%d bytes\n", kernel_base, kernel_size);
 

@@ -1,11 +1,14 @@
 #include <drivers/apic.h>
 #include <drivers/com1.h>
+#include <drivers/pit.h>
 #include <utility/port.h>
 #include <utility/hhdm.h>
 #include <memory/vmm.h>
 
 extern virt_addr_t* kernel_pml4;
 volatile uint32_t* io_apic_base;
+volatile uint32_t* lapic_regs;
+uint32_t lapic_ticks_per_ms = 0;
 
 static inline uint64_t read_msr(uint32_t msr) {
     uint32_t lower;
@@ -16,6 +19,10 @@ static inline uint64_t read_msr(uint32_t msr) {
                       : "c"(msr)
                       );
     return ((uint64_t)upper << 32) | lower;
+}
+
+void apic_eoi() {
+    lapic_regs[LAPIC_EOI / 4] = 0;
 }
 
 void disable_pic() {
@@ -47,7 +54,7 @@ void apic_init() {
     vmm_map_page(kernel_pml4, lapic_virt, lapic_phys, PT_FLAG_PRESENT | PT_FLAG_WRITE);
 
     // Enable LAPIC
-    volatile uint32_t* lapic_regs = (volatile uint32_t*)lapic_virt;
+    lapic_regs = (volatile uint32_t*)lapic_virt;
     uint32_t spurious = lapic_regs[SPURIOUS_OFFSET/4];
     spurious &= ~0xFF;
     spurious |= SPURIOUS_VECTOR;
@@ -64,6 +71,16 @@ void io_apic_write(uint8_t offset, uint32_t value) {
 uint32_t io_apic_read(uint8_t offset) {
     *(io_apic_base) = offset;
     return *(io_apic_base + 4);
+}
+
+void io_apic_map_irq(uint8_t pin, uint8_t vector) {
+    uint32_t low_index = 0x10 + (pin * 2);
+    uint32_t high_index = 0x11 + (pin * 2);
+
+    io_apic_write(high_index, 0);
+
+    uint32_t low_part = vector; 
+    io_apic_write(low_index, low_part);
 }
 
 // Called from acpi.c
@@ -83,4 +100,21 @@ void io_apic_init(phys_addr_t phys_addr) {
     
     serial_printf("[APIC] I/O APIC ID: %d, Version: 0x%x, Pins: %d\n", 
                   (id >> 24) & 0xF, ver & 0xFF, count + 1);
+}
+
+/* APIC Timer */
+void apic_timer_init(uint16_t hz) {
+    lapic_regs[TIMER_DIV/4] = 0x3;
+    lapic_regs[TIMER_LVT/4] = (1 << 16);
+    lapic_regs[TIMER_INIT/4] = 0xFFFFFFFF;
+    pit_sleep(10);
+    lapic_regs[TIMER_LVT/4] = (1 << 16);
+    uint32_t current_ticks = lapic_regs[TIMER_CURR/4];
+    uint32_t ticks_passed = 0xFFFFFFFF - current_ticks;
+    lapic_ticks_per_ms = ticks_passed / 10;
+
+    serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
+    lapic_regs[TIMER_LVT/4] = TIMER_VECTOR | (1 << 17);
+    lapic_regs[TIMER_DIV/4] = 0x3;
+    lapic_regs[TIMER_INIT/4] = lapic_ticks_per_ms * (1000/hz);
 }

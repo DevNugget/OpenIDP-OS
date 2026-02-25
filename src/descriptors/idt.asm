@@ -74,7 +74,7 @@ interrupt_stub:
 
 	mov rdi, rsp
     call interrupt_dispatch
-	mov rax, rsp
+	mov rsp, rax
 
     pop r15
     pop r14

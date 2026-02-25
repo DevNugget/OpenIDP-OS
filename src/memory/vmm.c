@@ -5,16 +5,6 @@
 
 virt_addr_t* kernel_pml4 = NULL;
 
-static inline phys_addr_t read_cr3() {
-    phys_addr_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r" (cr3));
-    return cr3;
-}
-
-static inline void write_cr3(phys_addr_t val) {
-    __asm__ volatile("mov %0, %%cr3" :: "r" (val) : "memory");
-}
-
 static inline phys_addr_t cr3_phys_addr(uint64_t pte) {
     return (pte & CR3_ADDR_MASK);
 }
@@ -98,6 +88,41 @@ void vmm_map_page(phys_addr_t* pml4, virt_addr_t virt, phys_addr_t phys, uint64_
     pt[pt_index] = phys | flags | PT_FLAG_PRESENT;
 
     __asm__ volatile("invlpg (%0)" :: "r" (virt) : "memory");
+}
+
+void vmm_unmap_page(phys_addr_t* pml4, virt_addr_t virt) {
+    size_t pml4_index = pml4_idx(virt);
+    size_t pdpr_index = pdpr_idx(virt);
+    size_t pd_index = pd_idx(virt);
+    size_t pt_index = pt_idx(virt);
+
+    virt_addr_t* pdpr = (virt_addr_t*)phys_to_virt(pte_phys_addr(pml4[pml4_index]));
+    virt_addr_t* pd   = (virt_addr_t*)phys_to_virt(pte_phys_addr(pdpr[pdpr_index]));
+    virt_addr_t* pt   = (virt_addr_t*)phys_to_virt(pte_phys_addr(pd[pd_index]));
+
+    pt[pt_index] = 0; 
+    
+    __asm__ volatile("invlpg (%0)" :: "r" (virt) : "memory");
+}
+
+virt_addr_t* vmm_create_new_pml4() {
+    phys_addr_t pml4_phys = pmm_alloc(1);
+    if (pml4_phys == 0) {
+        return NULL;
+    }
+
+    virt_addr_t* new_pml4 = (virt_addr_t*)phys_to_virt(pml4_phys);
+    memset(new_pml4, 0, PAGE_SIZE / 2); 
+
+    for (uint64_t i = 256; i < 512; i++) {
+        new_pml4[i] = kernel_pml4[i];
+    }
+
+    return new_pml4;
+}
+
+phys_addr_t vmm_get_phys(virt_addr_t* virt_pml4) {
+    return (phys_addr_t)virt_pml4 - (phys_addr_t)phys_to_virt(0);
 }
 
 uint64_t convert_x86_64_vm_flags(size_t flags) {

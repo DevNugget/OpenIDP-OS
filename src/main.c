@@ -20,6 +20,8 @@
 #include <memory/vmm.h>
 #include <memory/kheap.h>
 
+#include <multitasking/scheduler.h>
+
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(4);
 
@@ -41,6 +43,32 @@ static void hcf(void) {
     }
 }
 
+void idle_main(void* arg) {
+    serial_printf("[SCHED] Idle Process Started\n");
+    while (true)
+    asm("hlt");
+}
+
+void worker_1(void* arg) {
+    serial_printf("[SCHED] Worker 1 Process Started with arg: %s\n", (char*)arg);
+    
+    while (true) {
+        for (volatile int i = 0; i < 10000000; i++); 
+        
+        serial_printf("Worker 1 is running...\n");
+    }
+}
+
+void worker_2(void* arg) {
+    serial_printf("[SCHED] Worker 2 Process Started with arg: %s\n", (char*)arg);
+    
+    while (true) {
+        for (volatile int i = 0; i < 10000000; i++); 
+        
+        serial_printf("Worker 2 is running...\n");
+    }
+}
+
 void kmain(void) {
     if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
         hcf();
@@ -55,7 +83,7 @@ void kmain(void) {
     kheap_init();
     acpi_init();
     apic_init();
-    apic_timer_init(2);
+    apic_timer_init(10);
     keyboard_init();
     
     if (framebuffer_request.response == NULL
@@ -69,34 +97,10 @@ void kmain(void) {
         volatile uint32_t *fb_ptr = framebuffer->address;
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
-    
-    serial_write_str("Hello World!\n");
-    serial_u64_dec(69420);
-    serial_write_str("\n");
-    serial_u64_hex(0xFFA);
-    serial_write_str("\n");
 
-    while (true) {
-        if (keyboard_poll()) {
-            key_event_t event = keyboard_read();
-
-            if (event.is_pressed) {
-                char c = get_printable_char(event);
-
-                if (c != 0) {
-                    serial_printf("%c", c);
-                }
-                
-                if (event.code == KEY_ENTER) {
-                    serial_printf("\n");
-                }
-                if (event.code == KEY_BACKSPACE) {
-                    serial_printf("\b");
-                }
-            }
-        }
-        asm ("hlt");
-    }
+    create_process("idle", idle_main, NULL);
+    create_process("worker1", worker_1, "TestArg");
+    create_process("worker2", worker_2, "TestArg");
         
     hcf();
 }

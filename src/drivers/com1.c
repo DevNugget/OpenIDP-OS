@@ -1,6 +1,7 @@
 #include <drivers/com1.h>
 #include <utility/port.h>
 
+#include <stddef.h>
 #include <stdarg.h>
 
 #define PORT 0x3f8 // COM1
@@ -100,6 +101,16 @@ void serial_printf(const char* fmt_str, ...) {
 
         chr++;
         switch (*chr) {
+            case 's': {
+                char* str = va_arg(args, char*); 
+                if (str == NULL) {
+                    str = "(null)";
+                }
+                while (*str) {
+                    outportb(PORT, *str++);
+                }
+                break;
+            }
             case 'c': {
                 char c = (char)va_arg(args, int);
                 outportb(PORT, c);

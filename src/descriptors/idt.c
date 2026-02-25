@@ -4,6 +4,7 @@
 #include <drivers/apic.h>
 #include <drivers/keyboard.h>
 #include <utility/cpu_state.h>
+#include <multitasking/scheduler.h>
 
 #define DESCRIPTOR_BYTES 16
 #define IDT_SIZE 256
@@ -44,6 +45,7 @@ void idt_init() {
 }
 
 cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
+    cpu_status_t* ctx = context;
     switch (context->vector_number) {
         case 13: {
             serial_write_str("general protection fault.\n");
@@ -66,7 +68,7 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
         }
 
         case 0x20: {
-            //serial_printf("apic timer fired!\n");
+            ctx = schedule(context);
             break;
         }
 
@@ -82,5 +84,5 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
     }
 
     if (context->vector_number >= 32) apic_eoi();
-    return context;
+    return ctx;
 }

@@ -1,0 +1,38 @@
+/* date = February 23rd 2026 4:49 pm */
+
+#ifndef PROCESS_H
+#define PROCESS_H
+
+#include <stdint.h>
+#include <utility/cpu_state.h>
+#include <utility/hhdm.h>
+
+#define PROC_NAME_LEN 64
+
+typedef enum {
+    THREAD_READY,
+    THREAD_RUNNING,
+    THREAD_DEAD
+} thread_status_t;
+
+struct thread_t;
+
+typedef struct process_t {
+    size_t pid;
+    char name[PROC_NAME_LEN];
+    virt_addr_t* pml4;
+    struct thread_t* threads;
+    struct process_t* next;
+} process_t;
+
+typedef struct thread_t {
+    size_t tid;
+    thread_status_t status;
+    cpu_status_t* context;
+    void* stack_base;
+    process_t* parent;
+    struct thread_t* next;
+    struct thread_t* sibling;
+} thread_t;
+
+#endif

@@ -13,6 +13,19 @@
 
 void vmm_init();
 void vmm_map_page(phys_addr_t* pml4, virt_addr_t virt, phys_addr_t phys, uint64_t flags);
+void vmm_unmap_page(phys_addr_t* pml4, virt_addr_t virt);
+virt_addr_t* vmm_create_new_pml4();
+phys_addr_t vmm_get_phys(virt_addr_t* virt_pml4);
+
+static inline phys_addr_t read_cr3() {
+    phys_addr_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r" (cr3));
+    return cr3;
+}
+
+static inline void write_cr3(phys_addr_t val) {
+    __asm__ volatile("mov %0, %%cr3" :: "r" (val) : "memory");
+}
 
 #define PT_FLAG_PRESENT (1ULL << 0)
 #define PT_FLAG_WRITE   (1ULL << 1)

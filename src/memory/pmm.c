@@ -203,11 +203,13 @@ phys_addr_t pmm_alloc(size_t frame_count) {
                 }
 
                 phys_addr_t address = start_bit * PAGE_SIZE;
+                /*
                 serial_printf(
                     "[PMM](pmm_alloc) Usage after alloc @(PHYS)0x%x + %u: (%u pages/%u pages) (%u.%u MiB/%u.%u MiB)\n",
                     address, frame_count, used_pages, total_pages, pages_to_mib(used_pages), 
                     ((used_pages % 256) * 4), pages_to_mib(total_pages), ((total_pages % 256) * 4)
                 );
+                */
                 return address;
             }
         } else {
@@ -224,9 +226,11 @@ void pmm_free(phys_addr_t addr, size_t frame_count) {
     for (uint64_t i = 0; i < frame_count; i++) {
         bitmap_unset(start_idx + i);
     }
+    /*
     serial_printf(
         "[PMM](pmm_free) Usage after %u page free: (%u pages/%u pages) (%u.%u MiB/%u.%u MiB)\n",
         frame_count, used_pages, total_pages, pages_to_mib(used_pages), 
         ((used_pages % 256) * 4), pages_to_mib(total_pages), ((total_pages % 256) * 4)
     );
+    */
 }

@@ -41,6 +41,7 @@ void io_apic_init(phys_addr_t phys_addr);
 void io_apic_map_irq(uint8_t pin, uint8_t vector);
 void apic_timer_init(uint16_t hz);
 void apic_eoi();
+uint32_t apic_get_id();
 
 /* PIC 8259 ports & ICW */
 #define PIC_COMMAND_MASTER 0x20

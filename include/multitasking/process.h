@@ -30,6 +30,8 @@ typedef struct thread_t {
     thread_status_t status;
     cpu_status_t* context;
     void* stack_base;
+    void (*entry)(void*);
+    void* entry_arg;
     process_t* parent;
     struct thread_t* next;
     struct thread_t* sibling;

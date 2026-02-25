@@ -44,6 +44,7 @@ static void hcf(void) {
 }
 
 void idle_main(void* arg) {
+    (void)arg;
     serial_printf("[SCHED] Idle Process Started\n");
     while (true)
     asm("hlt");

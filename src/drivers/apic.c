@@ -39,6 +39,14 @@ void disable_pic() {
     serial_printf("[APIC](disable_pic) Disabled legacy PIC 8259.\n");
 }
 
+uint32_t apic_get_id() {
+    if (lapic_regs == NULL) {
+        return 0;
+    }
+
+    return (lapic_regs[LAPIC_ID_OFFSET / 4] >> 24) & 0xFF;
+}
+
 void apic_init() {
     disable_pic();
     

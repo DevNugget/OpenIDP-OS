@@ -10,5 +10,7 @@
 
 cpu_status_t* schedule(cpu_status_t* context);
 process_t* create_process(char* name, void(*function)(void*), void* arg);
+thread_t* scheduler_current_thread(void);
+__attribute__((noreturn)) void thread_exit(void);
 
 #endif

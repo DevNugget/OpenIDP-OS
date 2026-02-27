@@ -259,81 +259,71 @@ static __attribute__((noreturn)) void thread_entry_trampoline(void) {
     thread_exit();
 }
 
-cpu_status_t* schedule(cpu_status_t* context) {
-    size_t cpu_index = cpu_slot_index();
-    if (!scheduler_initialized || cpu_index >= scheduler_cpu_count) {
-        return context;
+static void flush_deferred_thread(size_t cpu_index) {
+    thread_t* deferred = deferred_threads[cpu_index];
+    if (deferred == NULL) {
+        return;
     }
 
-    thread_t* current_thread = current_threads[cpu_index];
+    deferred_threads[cpu_index] = NULL;
 
-    if (deferred_threads[cpu_index] != NULL) {
-        thread_t* deferred = deferred_threads[cpu_index];
-        deferred_threads[cpu_index] = NULL;
+    if (deferred->status == THREAD_READY) {
+        uint64_t rq_flags = spinlock_lock_irqsave(&run_queue_lock);
+        enqueue_thread_unsafe(deferred);
+        spinlock_unlock_irqrestore(&run_queue_lock, rq_flags);
+    } else if (deferred->status == THREAD_DEAD) {
+        queue_zombie(deferred);
+    }
+}
 
-        if (deferred->status == THREAD_READY) {
-            uint64_t rq_flags = spinlock_lock_irqsave(&run_queue_lock);
-            enqueue_thread_unsafe(deferred);
-            spinlock_unlock_irqrestore(&run_queue_lock, rq_flags);
-        } else if (deferred->status == THREAD_DEAD) {
-            queue_zombie(deferred);
-        }
+static int should_switch_thread(thread_t* current_thread) {
+    if (current_thread == NULL || current_thread->status != THREAD_RUNNING) {
+        return 1;
     }
 
-    if (current_thread != NULL) {
-        current_thread->context = context;
-    }
+    current_thread->quantum_ticks++;
+    return current_thread->quantum_ticks >= DEFAULT_TIME_SLICE_TICKS;
+}
 
-    int should_switch = 1;
-    if (current_thread != NULL && current_thread->status == THREAD_RUNNING) {
-        current_thread->quantum_ticks++;
-        if (current_thread->quantum_ticks < DEFAULT_TIME_SLICE_TICKS) {
-            should_switch = 0;
-        }
-    }
-
-    if (!should_switch) {
-        return context;
-    }
-
-    thread_t* next_thread = NULL;
-
+static thread_t* dequeue_next_runnable_thread(void) {
     uint64_t rq_flags = spinlock_lock_irqsave(&run_queue_lock);
-    next_thread = dequeue_thread_unsafe();
+    thread_t* next_thread = dequeue_thread_unsafe();
     spinlock_unlock_irqrestore(&run_queue_lock, rq_flags);
+    return next_thread;
+}
 
-    if (next_thread == NULL) {
-        next_thread = idle_threads[cpu_index];
-        if (next_thread == NULL && current_thread != NULL && current_thread->status != THREAD_DEAD) {
-            current_thread->quantum_ticks = 0;
-            return context;
-        }
+static thread_t* pick_next_thread(size_t cpu_index, thread_t* current_thread) {
+    thread_t* next_thread = dequeue_next_runnable_thread();
+    if (next_thread != NULL) {
+        return next_thread;
     }
 
-    if (next_thread == NULL) {
-        return context;
+    next_thread = idle_threads[cpu_index];
+    if (next_thread == NULL && current_thread != NULL && current_thread->status != THREAD_DEAD) {
+        current_thread->quantum_ticks = 0;
+        return current_thread;
     }
 
-    if (current_thread != NULL && current_thread != next_thread) {
-        if (current_thread->status == THREAD_RUNNING) {
-            current_thread->status = THREAD_READY;
-        }
+    return next_thread;
+}
 
-        if (current_thread->status == THREAD_READY || current_thread->status == THREAD_DEAD) {
-            deferred_threads[cpu_index] = current_thread;
-        }
-
-        save_simd_state(current_thread);
+static void defer_current_if_needed(size_t cpu_index, thread_t* current_thread, thread_t* next_thread) {
+    if (current_thread == NULL || current_thread == next_thread) {
+        return;
     }
 
-    current_threads[cpu_index] = next_thread;
-    next_thread->status = THREAD_RUNNING;
-    next_thread->quantum_ticks = 0;
+    if (current_thread->status == THREAD_RUNNING) {
+        current_thread->status = THREAD_READY;
+    }
 
-    restore_or_init_simd_state(next_thread);
+    if (current_thread->status == THREAD_READY || current_thread->status == THREAD_DEAD) {
+        deferred_threads[cpu_index] = current_thread;
+    }
 
-    cpu_status_t* next_context = next_thread->context;
+    save_simd_state(current_thread);
+}
 
+static void switch_address_space(size_t cpu_index, thread_t* next_thread) {
     phys_addr_t new_cr3 = 0;
 
     if (next_thread == idle_threads[cpu_index]) {
@@ -345,8 +335,86 @@ cpu_status_t* schedule(cpu_status_t* context) {
     if (new_cr3 != 0 && read_cr3() != new_cr3) {
         write_cr3(new_cr3);
     }
+}
+
+cpu_status_t* schedule(cpu_status_t* context) {
+    size_t cpu_index = cpu_slot_index();
+    if (!scheduler_initialized || cpu_index >= scheduler_cpu_count) {
+        return context;
+    }
+
+    thread_t* current_thread = current_threads[cpu_index];
+
+    flush_deferred_thread(cpu_index);
+
+    if (current_thread != NULL) {
+        current_thread->context = context;
+    }
+
+    if (!should_switch_thread(current_thread)) {
+        return context;
+    }
+
+    thread_t* next_thread = pick_next_thread(cpu_index, current_thread);
+
+    if (next_thread == NULL) {
+        return context;
+    }
+
+    if (next_thread == current_thread) {
+        return context;
+    }
+
+    defer_current_if_needed(cpu_index, current_thread, next_thread);
+
+    current_threads[cpu_index] = next_thread;
+    next_thread->status = THREAD_RUNNING;
+    next_thread->quantum_ticks = 0;
+
+    restore_or_init_simd_state(next_thread);
+
+    cpu_status_t* next_context = next_thread->context;
+    switch_address_space(cpu_index, next_thread);
 
     return next_context;
+}
+
+static int allocate_thread_simd_state(thread_t* thread) {
+    thread->simd_state_alloc = kmalloc(SIMD_STATE_SIZE + 16);
+    if (thread->simd_state_alloc == NULL) {
+        return 0;
+    }
+
+    uintptr_t aligned_simd = ((uintptr_t)thread->simd_state_alloc + 15U) & ~(uintptr_t)0xFU;
+    thread->simd_state = (uint8_t*)aligned_simd;
+    thread->simd_state_valid = 0;
+    return 1;
+}
+
+static void initialize_thread_context(thread_t* thread, uint64_t stack_top) {
+    thread->context = (cpu_status_t*)(stack_top - sizeof(cpu_status_t));
+    memset(thread->context, 0, sizeof(cpu_status_t));
+
+    thread->context->iret_ss = KERNEL_DATA;
+    thread->context->iret_rsp = stack_top;
+    thread->context->iret_flags = 0x202;
+    thread->context->iret_cs = KERNEL_CODE;
+    thread->context->iret_rip = (uint64_t)thread_entry_trampoline;
+}
+
+static void link_thread_to_process(process_t* parent, thread_t* thread) {
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    thread->tid = next_tid++;
+
+    thread->sibling = parent->threads;
+    parent->threads = thread;
+    spinlock_unlock_irqrestore(&process_lock, flags);
+}
+
+static void enqueue_thread(thread_t* thread) {
+    uint64_t rq_flags = spinlock_lock_irqsave(&run_queue_lock);
+    enqueue_thread_unsafe(thread);
+    spinlock_unlock_irqrestore(&run_queue_lock, rq_flags);
 }
 
 static thread_t* create_thread(process_t* parent, void(*function)(void*), void* arg, int enqueue) {
@@ -363,45 +431,50 @@ static thread_t* create_thread(process_t* parent, void(*function)(void*), void* 
         return NULL;
     }
 
-    thread->simd_state_alloc = kmalloc(SIMD_STATE_SIZE + 16);
-    if (thread->simd_state_alloc == NULL) {
+    if (!allocate_thread_simd_state(thread)) {
         kfree(thread->stack_base);
         kfree(thread);
         return NULL;
     }
-
-    uintptr_t aligned_simd = ((uintptr_t)thread->simd_state_alloc + 15U) & ~(uintptr_t)0xFU;
-    thread->simd_state = (uint8_t*)aligned_simd;
-    thread->simd_state_valid = 0;
 
     thread->status = THREAD_READY;
     thread->parent = parent;
     thread->entry = function;
     thread->entry_arg = arg;
 
-    thread->context = (cpu_status_t*)(stack_top - sizeof(cpu_status_t));
-    memset(thread->context, 0, sizeof(cpu_status_t));
-
-    thread->context->iret_ss = KERNEL_DATA;
-    thread->context->iret_rsp = stack_top;
-    thread->context->iret_flags = 0x202;
-    thread->context->iret_cs = KERNEL_CODE;
-    thread->context->iret_rip = (uint64_t)thread_entry_trampoline;
-
-    uint64_t flags = spinlock_lock_irqsave(&process_lock);
-    thread->tid = next_tid++;
-
-    thread->sibling = parent->threads;
-    parent->threads = thread;
-    spinlock_unlock_irqrestore(&process_lock, flags);
+    initialize_thread_context(thread, stack_top);
+    link_thread_to_process(parent, thread);
 
     if (enqueue) {
-        uint64_t rq_flags = spinlock_lock_irqsave(&run_queue_lock);
-        enqueue_thread_unsafe(thread);
-        spinlock_unlock_irqrestore(&run_queue_lock, rq_flags);
+        enqueue_thread(thread);
     }
 
     return thread;
+}
+
+static void unlink_process_unsafe(process_t* process) {
+    if (processes_list == process) {
+        processes_list = process->next;
+        return;
+    }
+
+    process_t* iter = processes_list;
+    while (iter && iter->next != process) {
+        iter = iter->next;
+    }
+
+    if (iter != NULL) {
+        iter->next = process->next;
+    }
+}
+
+static void destroy_failed_process(process_t* process) {
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    unlink_process_unsafe(process);
+    spinlock_unlock_irqrestore(&process_lock, flags);
+
+    pmm_free(vmm_get_phys(process->pml4), 1);
+    kfree(process);
 }
 
 process_t* create_process(char* name, void(*function)(void*), void* arg) {
@@ -432,21 +505,7 @@ process_t* create_process(char* name, void(*function)(void*), void* arg) {
     if (function != NULL) {
         thread_t* main_thread = create_thread(process, function, arg, 1);
         if (main_thread == NULL) {
-            flags = spinlock_lock_irqsave(&process_lock);
-            if (processes_list == process) {
-                processes_list = process->next;
-            } else {
-                process_t* iter = processes_list;
-                while (iter && iter->next != process) {
-                    iter = iter->next;
-                }
-                if (iter != NULL) {
-                    iter->next = process->next;
-                }
-            }
-            spinlock_unlock_irqrestore(&process_lock, flags);
-            pmm_free(vmm_get_phys(process->pml4), 1);
-            kfree(process);
+            destroy_failed_process(process);
             return NULL;
         }
     }

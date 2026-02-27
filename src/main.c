@@ -99,9 +99,9 @@ void kmain(void) {
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
 
-    create_process("idle", idle_main, NULL);
-    create_process("worker1", worker_1, "TestArg");
-    create_process("worker2", worker_2, "TestArg");
-        
+    scheduler_create_init_processes();
+    //create_process("worker1", worker_1, "TestArg");
+    //create_process("worker2", worker_2, "TestArg");
+
     hcf();
 }

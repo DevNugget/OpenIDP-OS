@@ -32,6 +32,10 @@ typedef struct thread_t {
     void* stack_base;
     void (*entry)(void*);
     void* entry_arg;
+    uint8_t* simd_state_alloc;
+    uint8_t* simd_state;
+    uint8_t simd_state_valid;
+    uint32_t quantum_ticks;
     process_t* parent;
     struct thread_t* next;
     struct thread_t* sibling;

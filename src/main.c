@@ -11,6 +11,7 @@
 #include <drivers/com1.h>
 #include <drivers/acpi.h>
 #include <drivers/apic.h>
+#include <drivers/pci.h>
 #include <drivers/keyboard.h>
 
 #include <descriptors/gdt.h>
@@ -86,6 +87,7 @@ void kmain(void) {
     apic_init();
     apic_timer_init(10);
     keyboard_init();
+    pci_init();
     
     if (framebuffer_request.response == NULL
         || framebuffer_request.response->framebuffer_count < 1) {

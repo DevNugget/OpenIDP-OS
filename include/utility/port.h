@@ -8,4 +8,7 @@
 uint8_t inportb(int portnum);
 void outportb(int portnum, uint8_t data);
 
+uint32_t inportl(int portnum);
+void outportl(int portnum, uint32_t data);
+
 #endif //PORT_H

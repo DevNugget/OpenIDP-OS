@@ -26,6 +26,7 @@
 #include <memory/kheap.h>
 
 #include <multitasking/scheduler.h>
+#include <multitasking/smp.h>
 
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(4);
@@ -117,6 +118,7 @@ void kmain(void) {
     acpi_init();
     apic_init();
     apic_timer_init(10);
+    smp_init();
     keyboard_init();
     pci_init();
     nvme_init();
@@ -139,6 +141,7 @@ void kmain(void) {
     scheduler_create_init_processes();
     //create_process("worker1", worker_1, "TestArg");
     //create_process("worker2", worker_2, "TestArg");
+    //create_user_process_from_path("user_hello", "/nvme/bin/hello.elf");
 
     hcf();
 }

@@ -1,10 +1,13 @@
 #include <drivers/com1.h>
 #include <utility/port.h>
+#include <utility/spinlock.h>
 
 #include <stddef.h>
 #include <stdarg.h>
 
 #define PORT 0x3f8 // COM1
+
+static spinlock_t serial_lock = SPINLOCK_INIT;
 
 /* https://wiki.osdev.org/Serial_Ports#Initialization */
 int serial_init() {

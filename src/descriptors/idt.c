@@ -44,6 +44,11 @@ void idt_init() {
     asm volatile ("sti");
 }
 
+void idt_init_cpu(void) {
+    load_idt(idt);
+    asm volatile ("sti");
+}
+
 cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
     cpu_status_t* ctx = context;
     switch (context->vector_number) {

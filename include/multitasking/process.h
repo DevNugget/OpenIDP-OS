@@ -36,6 +36,7 @@ typedef struct thread_t {
     uint8_t* simd_state;
     uint8_t simd_state_valid;
     uint32_t quantum_ticks;
+    uint8_t is_user_thread;
     process_t* parent;
     struct thread_t* next;
     struct thread_t* sibling;

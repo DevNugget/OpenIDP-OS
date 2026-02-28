@@ -1,10 +1,14 @@
 #include <multitasking/scheduler.h>
 #include <multitasking/process.h>
+#include <multitasking/smp.h>
 
 #include <descriptors/gdt.h>
 
 #include <drivers/apic.h>
 #include <drivers/com1.h>
+
+#include <elf/elf_loader.h>
+#include <fs/vfs.h>
 
 #include <memory/kheap.h>
 #include <memory/pmm.h>
@@ -19,13 +23,14 @@
 #define DEFAULT_TIME_SLICE_TICKS 4
 #define SIMD_STATE_SIZE 512
 
-extern virt_addr_t* kernel_pml4;
+#define USER_STACK_TOP 0x00007FFFFFFFE000ULL
+#define USER_STACK_PAGES 16
+#define USER_STACK_GUARD_PAGES 1
+#define USER_PROCESS_FILE_CHUNK 1024
 
-__attribute__((used, section(".limine_requests")))
-static volatile struct limine_mp_request mp_request = {
-    .id = LIMINE_MP_REQUEST_ID,
-    .revision = 0
-};
+#define VFS_O_READ 0x1
+
+extern virt_addr_t* kernel_pml4;
 
 static thread_t* run_queue_head = NULL;
 static thread_t* run_queue_tail = NULL;
@@ -78,9 +83,9 @@ static void scheduler_init_once(void) {
         return;
     }
 
-    size_t cpu_count = 1;
-    if (mp_request.response != NULL && mp_request.response->cpu_count > 0) {
-        cpu_count = (size_t)mp_request.response->cpu_count;
+    size_t cpu_count = smp_get_cpu_count();
+    if (cpu_count == 0) {
+        cpu_count = 1;
     }
 
     scheduler_cpu_count = cpu_count;
@@ -192,6 +197,28 @@ static uint64_t alloc_stack(thread_t* thread) {
     uint64_t stack_top = (uint64_t)stack_bottom + PROCESS_STACK_SIZE;
     stack_top &= ~0xFULL;
     return stack_top;
+}
+
+static int allocate_user_stack(process_t* process, uint64_t* out_stack_top) {
+    if (process == NULL || process->pml4 == NULL || out_stack_top == NULL) {
+        return 0;
+    }
+
+    virt_addr_t stack_base = USER_STACK_TOP - ((USER_STACK_PAGES + USER_STACK_GUARD_PAGES) * PAGE_SIZE);
+    for (size_t i = USER_STACK_GUARD_PAGES; i < USER_STACK_PAGES + USER_STACK_GUARD_PAGES; i++) {
+        phys_addr_t phys = pmm_alloc(1);
+        if (phys == 0) {
+            return 0;
+        }
+
+        vmm_map_page((phys_addr_t*)process->pml4,
+                     stack_base + (i * PAGE_SIZE),
+                     phys,
+                     PT_FLAG_USER | PT_FLAG_WRITE | PT_FLAG_NX);
+    }
+
+    *out_stack_top = USER_STACK_TOP;
+    return 1;
 }
 
 static void queue_zombie(thread_t* thread) {
@@ -391,15 +418,22 @@ static int allocate_thread_simd_state(thread_t* thread) {
     return 1;
 }
 
-static void initialize_thread_context(thread_t* thread, uint64_t stack_top) {
+static void initialize_thread_context(thread_t* thread, uint64_t stack_top, int user_mode, uint64_t instruction_pointer) {
     thread->context = (cpu_status_t*)(stack_top - sizeof(cpu_status_t));
     memset(thread->context, 0, sizeof(cpu_status_t));
 
-    thread->context->iret_ss = KERNEL_DATA;
     thread->context->iret_rsp = stack_top;
     thread->context->iret_flags = 0x202;
-    thread->context->iret_cs = KERNEL_CODE;
-    thread->context->iret_rip = (uint64_t)thread_entry_trampoline;
+
+    if (user_mode) {
+        thread->context->iret_ss = USER_DATA | 0x3;
+        thread->context->iret_cs = USER_CODE | 0x3;
+        thread->context->iret_rip = instruction_pointer;
+    } else {
+        thread->context->iret_ss = KERNEL_DATA;
+        thread->context->iret_cs = KERNEL_CODE;
+        thread->context->iret_rip = (uint64_t)thread_entry_trampoline;
+    }
 }
 
 static void link_thread_to_process(process_t* parent, thread_t* thread) {
@@ -442,7 +476,44 @@ static thread_t* create_thread(process_t* parent, void(*function)(void*), void* 
     thread->entry = function;
     thread->entry_arg = arg;
 
-    initialize_thread_context(thread, stack_top);
+    initialize_thread_context(thread, stack_top, 0, 0);
+    link_thread_to_process(parent, thread);
+
+    if (enqueue) {
+        enqueue_thread(thread);
+    }
+
+    return thread;
+}
+
+static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int enqueue) {
+    if (!parent || parent->pml4 == NULL || entry_point == 0) {
+        return NULL;
+    }
+
+    thread_t* thread = kmalloc(sizeof(thread_t));
+    if (!thread) {
+        return NULL;
+    }
+
+    memset(thread, 0, sizeof(thread_t));
+
+    uint64_t user_stack_top = 0;
+    if (!allocate_user_stack(parent, &user_stack_top)) {
+        kfree(thread);
+        return NULL;
+    }
+
+    if (!allocate_thread_simd_state(thread)) {
+        kfree(thread);
+        return NULL;
+    }
+
+    thread->status = THREAD_READY;
+    thread->parent = parent;
+    thread->is_user_thread = 1;
+
+    initialize_thread_context(thread, user_stack_top, 1, entry_point);
     link_thread_to_process(parent, thread);
 
     if (enqueue) {
@@ -513,6 +584,103 @@ process_t* create_process(char* name, void(*function)(void*), void* arg) {
     return process;
 }
 
+static int read_vfs_file_all(const char* path, void** out_data, size_t* out_size) {
+    if (path == NULL || out_data == NULL || out_size == NULL) {
+        return -1;
+    }
+
+    vfs_file_t* file = NULL;
+    if (vfs_open(path, VFS_O_READ, &file) != VFS_OK) {
+        return -1;
+    }
+
+    size_t capacity = USER_PROCESS_FILE_CHUNK;
+    size_t length = 0;
+    uint8_t* buffer = kmalloc(capacity);
+    if (buffer == NULL) {
+        vfs_close(file);
+        return -1;
+    }
+
+    uint8_t chunk[USER_PROCESS_FILE_CHUNK];
+
+    while (1) {
+        size_t rd = 0;
+        vfs_status_t st = vfs_read(file, chunk, sizeof(chunk), &rd);
+        if (st != VFS_OK) {
+            vfs_close(file);
+            kfree(buffer);
+            return -1;
+        }
+
+        if (rd == 0) {
+            break;
+        }
+
+        if (length + rd > capacity) {
+            size_t new_capacity = capacity;
+            while (length + rd > new_capacity) {
+                new_capacity *= 2;
+            }
+
+            uint8_t* new_buffer = kmalloc(new_capacity);
+            if (new_buffer == NULL) {
+                vfs_close(file);
+                kfree(buffer);
+                return -1;
+            }
+
+            memcpy(new_buffer, buffer, length);
+            kfree(buffer);
+            buffer = new_buffer;
+            capacity = new_capacity;
+        }
+
+        memcpy(buffer + length, chunk, rd);
+        length += rd;
+    }
+
+    vfs_close(file);
+
+    *out_data = buffer;
+    *out_size = length;
+    return 0;
+}
+
+process_t* create_user_process_from_elf(char* name, const void* elf_image, size_t elf_image_size) {
+    process_t* process = create_process(name, NULL, NULL);
+    if (process == NULL) {
+        return NULL;
+    }
+
+    uint64_t entry_point = 0;
+    if (elf64_load_process_image(process, elf_image, elf_image_size, &entry_point) != 0) {
+        destroy_failed_process(process);
+        return NULL;
+    }
+
+    if (create_user_thread(process, entry_point, 1) == NULL) {
+        destroy_failed_process(process);
+        return NULL;
+    }
+
+    return process;
+}
+
+process_t* create_user_process_from_path(char* name, const char* path) {
+    void* elf_image = NULL;
+    size_t elf_size = 0;
+
+    if (read_vfs_file_all(path, &elf_image, &elf_size) != 0) {
+        return NULL;
+    }
+
+    process_t* process = create_user_process_from_elf(name, elf_image, elf_size);
+    kfree(elf_image);
+
+    return process;
+}
+
 static void idle_thread_func(void* arg);
 static void reaper_thread_func(void* arg);
 
@@ -529,7 +697,7 @@ void scheduler_create_init_processes(void) {
 }
 
 static void idle_thread_func(void* arg) {
-    serial_printf("[SCHED] Idle Process Started\n");
+    //serial_printf("[SCHED] Idle Process Started\n");
     while (1) {
         asm volatile ("hlt");
     }

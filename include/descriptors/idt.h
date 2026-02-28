@@ -26,5 +26,6 @@ typedef struct idtr {
 } __attribute__((packed)) idtr_t;
 
 void idt_init();
+void idt_init_cpu(void);
 
 #endif //IDT_H

@@ -47,6 +47,18 @@ uint32_t apic_get_id() {
     return (lapic_regs[LAPIC_ID_OFFSET / 4] >> 24) & 0xFF;
 }
 
+void apic_enable_local(void) {
+    if (lapic_regs == NULL) {
+        return;
+    }
+
+    uint32_t spurious = lapic_regs[SPURIOUS_OFFSET/4];
+    spurious &= ~0xFF;
+    spurious |= SPURIOUS_VECTOR;
+    spurious |= (1 << 8);
+    lapic_regs[SPURIOUS_OFFSET/4] = spurious;
+}
+
 void apic_init() {
     disable_pic();
     
@@ -61,13 +73,8 @@ void apic_init() {
     
     vmm_map_page(kernel_pml4, lapic_virt, lapic_phys, PT_FLAG_PRESENT | PT_FLAG_WRITE);
 
-    // Enable LAPIC
     lapic_regs = (volatile uint32_t*)lapic_virt;
-    uint32_t spurious = lapic_regs[SPURIOUS_OFFSET/4];
-    spurious &= ~0xFF;
-    spurious |= SPURIOUS_VECTOR;
-    spurious |= (1 << 8);
-    lapic_regs[SPURIOUS_OFFSET/4] = spurious;
+    apic_enable_local();
 }
 
 /* I/O APIC */
@@ -110,6 +117,16 @@ void io_apic_init(phys_addr_t phys_addr) {
                   (id >> 24) & 0xF, ver & 0xFF, count + 1);
 }
 
+void apic_timer_start(uint16_t hz) {
+    if (lapic_regs == NULL || lapic_ticks_per_ms == 0 || hz == 0) {
+        return;
+    }
+
+    lapic_regs[TIMER_LVT/4] = TIMER_VECTOR | (1 << 17);
+    lapic_regs[TIMER_DIV/4] = 0x3;
+    lapic_regs[TIMER_INIT/4] = lapic_ticks_per_ms * (1000 / hz);
+}
+
 /* APIC Timer */
 void apic_timer_init(uint16_t hz) {
     lapic_regs[TIMER_DIV/4] = 0x3;
@@ -122,7 +139,5 @@ void apic_timer_init(uint16_t hz) {
     lapic_ticks_per_ms = ticks_passed / 10;
 
     serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
-    lapic_regs[TIMER_LVT/4] = TIMER_VECTOR | (1 << 17);
-    lapic_regs[TIMER_DIV/4] = 0x3;
-    lapic_regs[TIMER_INIT/4] = lapic_ticks_per_ms * (1000/hz);
+    apic_timer_start(hz);
 }

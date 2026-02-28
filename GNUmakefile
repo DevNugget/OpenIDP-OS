@@ -136,3 +136,13 @@ obj/%.asm.o: %.asm GNUmakefile
 .PHONY: clean
 clean:
 	rm -rf bin obj
+
+.PHONY: userspace userspace-install userspace-clean
+userspace:
+	$(MAKE) -C userspace all
+
+userspace-install:
+	$(MAKE) -C userspace install NVME_IMG=$(CURDIR)/nvme.img
+
+userspace-clean:
+	$(MAKE) -C userspace clean

@@ -30,3 +30,11 @@ void* phys_to_virt(uint64_t phys) {
     
     return (void*)(phys+hhdm_offset);
 }
+
+phys_addr_t virt_to_phys(virt_addr_t virt) {
+    if (hhdm_offset == 0x0) {
+        serial_write_str("[HHDM](virt_to_phys) No HHDM offset. Did you call hhdm_request_offset()?\n");
+    }
+
+    return virt - hhdm_offset;
+}

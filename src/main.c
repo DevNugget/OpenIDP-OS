@@ -13,6 +13,10 @@
 #include <drivers/apic.h>
 #include <drivers/pci.h>
 #include <drivers/keyboard.h>
+#include <drivers/nvme.h>
+
+#include <fs/vfs.h>
+#include <fs/fatfs_adapter.h>
 
 #include <descriptors/gdt.h>
 #include <descriptors/idt.h>
@@ -71,6 +75,33 @@ void worker_2(void* arg) {
     }
 }
 
+#define VFS_O_READ   0x1
+#define VFS_O_WRITE  0x2
+#define VFS_O_CREATE 0x4
+
+static void test_read_file(void) {
+    vfs_file_t* f = NULL;
+    char buf[128];
+    size_t rd = 0;
+
+    vfs_status_t st = vfs_open("/nvme/test.txt", VFS_O_READ, &f);
+    if (st != VFS_OK) {
+        serial_printf("[TEST] open failed: %d\n", st);
+        return;
+    }
+
+    st = vfs_read(f, buf, sizeof(buf) - 1, &rd);
+    if (st != VFS_OK) {
+        serial_printf("[TEST] read failed: %d\n", st);
+        vfs_close(f);
+        return;
+    }
+
+    buf[rd] = '\0';
+    serial_printf("[TEST] read %u bytes: %s\n", (uint32_t)rd, buf);
+    vfs_close(f);
+}
+
 void kmain(void) {
     if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
         hcf();
@@ -88,6 +119,10 @@ void kmain(void) {
     apic_timer_init(10);
     keyboard_init();
     pci_init();
+    nvme_init();
+    vfs_init();
+    fatfs_mount_nvme("/nvme");
+    test_read_file();
     
     if (framebuffer_request.response == NULL
         || framebuffer_request.response->framebuffer_count < 1) {

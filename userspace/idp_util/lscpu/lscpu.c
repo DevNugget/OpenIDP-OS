@@ -1,8 +1,8 @@
+#include <libidp/syscall.h>
 
 void main(void) {
-    volatile int counter = 0;
+    sys_print("Hello from userspace\n");
+    sys_print("Test test, test test.\n");
 
-    while (1) {
-        counter++;
-    }
+    sys_exit(0);
 }

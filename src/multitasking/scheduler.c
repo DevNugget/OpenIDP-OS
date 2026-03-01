@@ -358,10 +358,6 @@ static void defer_current_if_needed(size_t cpu_index, thread_t* current_thread, 
         current_thread->status = THREAD_READY;
     }
 
-    if (current_thread->status == THREAD_READY || current_thread->status == THREAD_DEAD) {
-        deferred_threads[cpu_index] = current_thread;
-    }
-
     if (current_thread != idle_threads[cpu_index]) {
         if (current_thread->status == THREAD_READY || current_thread->status == THREAD_DEAD) {
             deferred_threads[cpu_index] = current_thread;
@@ -420,6 +416,11 @@ cpu_status_t* schedule(cpu_status_t* context) {
     next_thread->quantum_ticks = 0;
 
     restore_or_init_simd_state(next_thread);
+
+    if (next_thread->is_user_thread) {
+        extern void gdt_set_tss_rsp0(size_t cpu_index, uint64_t rsp0);
+        gdt_set_tss_rsp0(cpu_index, (uint64_t)next_thread->stack_base + PROCESS_STACK_SIZE);
+    }
 
     cpu_status_t* next_context = next_thread->context;
     switch_address_space(cpu_index, next_thread);
@@ -508,15 +509,10 @@ static thread_t* create_thread(process_t* parent, void(*function)(void*), void* 
 }
 
 static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int enqueue) {
-    if (!parent || parent->pml4 == NULL || entry_point == 0) {
-        return NULL;
-    }
+    if (!parent || parent->pml4 == NULL || entry_point == 0) return NULL;
 
     thread_t* thread = kmalloc(sizeof(thread_t));
-    if (!thread) {
-        return NULL;
-    }
-
+    if (!thread) return NULL;
     memset(thread, 0, sizeof(thread_t));
 
     uint64_t user_stack_top = 0;
@@ -525,7 +521,14 @@ static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int
         return NULL;
     }
 
+    uint64_t kernel_stack_top = alloc_stack(thread);
+    if (kernel_stack_top == 0) {
+        kfree(thread); 
+        return NULL;
+    }
+
     if (!allocate_thread_simd_state(thread)) {
+        kfree(thread->stack_base);
         kfree(thread);
         return NULL;
     }
@@ -534,7 +537,10 @@ static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int
     thread->parent = parent;
     thread->is_user_thread = 1;
 
-    initialize_thread_context(thread, user_stack_top, 1, entry_point);
+    initialize_thread_context(thread, kernel_stack_top, 1, entry_point);
+
+    thread->context->iret_rsp = user_stack_top;
+
     link_thread_to_process(parent, thread);
 
     if (enqueue) {
@@ -674,22 +680,22 @@ process_t* create_user_process_from_elf(char* name, const void* elf_image, size_
         return NULL;
     }
 
-    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    //uint64_t flags = spinlock_lock_irqsave(&process_lock);
 
     uint64_t entry_point = 0;
     if (elf64_load_process_image(process, elf_image, elf_image_size, &entry_point) != 0) {
         destroy_failed_process(process);
-        spinlock_unlock_irqrestore(&process_lock, flags);
+        //spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
     if (create_user_thread(process, entry_point, 1) == NULL) {
         destroy_failed_process(process);
-        spinlock_unlock_irqrestore(&process_lock, flags);
+        //spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
-    spinlock_unlock_irqrestore(&process_lock, flags);
+    //spinlock_unlock_irqrestore(&process_lock, flags);
     return process;
 }
 
@@ -697,17 +703,27 @@ process_t* create_user_process_from_path(char* name, const char* path) {
     void* elf_image = NULL;
     size_t elf_size = 0;
 
-    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    //uint64_t flags = spinlock_lock_irqsave(&process_lock);
+
+    serial_printf("[SCHED] Attempting to load user process: %s\n", path);
 
     if (read_vfs_file_all(path, &elf_image, &elf_size) != 0) {
-        spinlock_unlock_irqrestore(&process_lock, flags);
+        serial_printf("[SCHED] FATAL: Failed to read %s from VFS.\n", path);
+        //spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
+    serial_printf("[SCHED] Read %u bytes. Parsing ELF...\n", (uint32_t)elf_size);
+
     process_t* process = create_user_process_from_elf(name, elf_image, elf_size);
+    if (process == NULL) {
+        serial_printf("[SCHED] FATAL: ELF parsing failed for %s.\n", path);
+    } else {
+        serial_printf("[SCHED] Process %s created successfully!\n", name);
+    }
     kfree(elf_image);
 
-    spinlock_unlock_irqrestore(&process_lock, flags);
+    //spinlock_unlock_irqrestore(&process_lock, flags);
     return process;
 }
 

@@ -142,8 +142,9 @@ void kmain(void) {
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
 
-    create_process("worker1", worker_1, "TestArg");
-    create_process("worker2", worker_2, "TestArg");
+    //create_process("worker1", worker_1, "TestArg");
+    //create_process("worker2", worker_2, "TestArg");
+    create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
     create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
 
     hcf();

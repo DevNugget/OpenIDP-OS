@@ -42,6 +42,10 @@ static uint64_t make_code_or_data_descriptor(uint64_t flags) {
     return flags << 32;
 }
 
+void gdt_set_tss_rsp0(size_t cpu_index, uint64_t rsp0) {
+    tss_tables[cpu_index].rsp0 = rsp0;
+}
+
 static void install_tss_descriptor(uint64_t* gdt, const tss64_t* tss) {
     uintptr_t base = (uintptr_t)tss;
     uint64_t limit = sizeof(tss64_t) - 1;

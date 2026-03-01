@@ -2,4 +2,4 @@
 
 #qemu-system-x86_64 -boot d -cdrom image.iso -hda disk.img -serial stdio -m 1G -device qemu-xhci
 
-qemu-system-x86_64 -boot d -cdrom image.iso -serial stdio -m 1G -enable-kvm -smp 4 -drive file=nvme.img,if=none,id=nvm1,format=raw -device nvme,drive=nvm1,serial=deadbeef
+qemu-system-x86_64 -boot d -cdrom image.iso -serial stdio -m 1G -smp 8 -drive file=nvme.img,if=none,id=nvm1,format=raw -device nvme,drive=nvm1,serial=deadbeef

@@ -11,6 +11,8 @@ static spinlock_t serial_lock = SPINLOCK_INIT;
 
 /* https://wiki.osdev.org/Serial_Ports#Initialization */
 int serial_init() {
+    uint64_t flags = spinlock_lock_irqsave(&serial_lock);
+    
     outportb(PORT + 1, 0x00); // Disable all interrupts
     outportb(PORT + 3, 0x80); // Enable DLAB (set baud rate divisor)
     outportb(PORT + 0, 0x03); // Set divisor to 3 (lo byte) 38400 baud
@@ -20,23 +22,29 @@ int serial_init() {
     outportb(PORT + 4, 0x0B); // IRQs enabled, RTS/DSR set
     outportb(PORT + 4, 0x1E); // Set in loopback mode, test the serial chip
     outportb(PORT + 0, 0xAE); // Send a test byte
+    
     // Check that we received the same test byte we sent
     if(inportb(PORT + 0) != 0xAE) {
+        spinlock_unlock_irqrestore(&serial_lock, flags);
         return 1;
     }
+    
     // If serial is not faulty set it in normal operation mode:
     // not-loopback with IRQs enabled and OUT#1 and OUT#2 bits enabled
     outportb(PORT + 4, 0x0F);
+    
+    spinlock_unlock_irqrestore(&serial_lock, flags);
     return 0;
 }
 
-void serial_write_str(char* str) {
+/* Internal unlocked helper functions */
+static void _serial_write_str(const char* str) {
     for (int i = 0; str[i] != '\0'; i++) {
         outportb(PORT, str[i]);
     }
 }
 
-void serial_u64_dec(uint64_t n) {
+static void _serial_u64_dec(uint64_t n) {
     uint64_t x = n;
     char n_str[20];
     
@@ -58,10 +66,10 @@ void serial_u64_dec(uint64_t n) {
         end--;
     }
     
-    serial_write_str(n_str);
+    _serial_write_str(n_str);
 }
 
-void serial_u64_hex(uint64_t n) {
+static void _serial_u64_hex(uint64_t n) {
     uint64_t x = n;
     char n_str[20];
     char hex_letters[] = {'A', 'B', 'C', 'D', 'E', 'F'};
@@ -89,10 +97,31 @@ void serial_u64_hex(uint64_t n) {
         end--;
     }
     
-    serial_write_str(n_str);
+    _serial_write_str(n_str);
+}
+
+/* Public Locked API */
+void serial_write_str(char* str) {
+    uint64_t flags = spinlock_lock_irqsave(&serial_lock);
+    _serial_write_str(str);
+    spinlock_unlock_irqrestore(&serial_lock, flags);
+}
+
+void serial_u64_dec(uint64_t n) {
+    uint64_t flags = spinlock_lock_irqsave(&serial_lock);
+    _serial_u64_dec(n);
+    spinlock_unlock_irqrestore(&serial_lock, flags);
+}
+
+void serial_u64_hex(uint64_t n) {
+    uint64_t flags = spinlock_lock_irqsave(&serial_lock);
+    _serial_u64_hex(n);
+    spinlock_unlock_irqrestore(&serial_lock, flags);
 }
 
 void serial_printf(const char* fmt_str, ...) {
+    uint64_t flags = spinlock_lock_irqsave(&serial_lock);
+    
     va_list args;
     va_start(args, fmt_str);
 
@@ -122,15 +151,15 @@ void serial_printf(const char* fmt_str, ...) {
             case 'd':
             case 'u': {
                 uint64_t n = va_arg(args, uint64_t);
-                if (n == 0) serial_write_str("0");
-                else serial_u64_dec(n);
+                if (n == 0) _serial_write_str("0");
+                else _serial_u64_dec(n);
                 break;
             }
             case 'x':
             case 'p': {
                 uint64_t n = va_arg(args, uint64_t);
-                if (n == 0) serial_write_str("0");
-                else serial_u64_hex(n);
+                if (n == 0) _serial_write_str("0");
+                else _serial_u64_hex(n);
                 break;
             }
             case '%': {
@@ -138,11 +167,13 @@ void serial_printf(const char* fmt_str, ...) {
                 break;
             }
             default: {
-                serial_write_str("[COM1](printf) Unknown specifier");
+                _serial_write_str("[COM1](printf) Unknown specifier");
                 break;
             }
         }
     }
 
     va_end(args);
+    
+    spinlock_unlock_irqrestore(&serial_lock, flags);
 }

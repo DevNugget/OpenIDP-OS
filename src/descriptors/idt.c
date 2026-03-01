@@ -5,6 +5,7 @@
 #include <drivers/keyboard.h>
 #include <utility/cpu_state.h>
 #include <multitasking/scheduler.h>
+#include <syscall/syscall.h>
 
 #define DESCRIPTOR_BYTES 16
 #define IDT_SIZE 256
@@ -107,8 +108,15 @@ void set_idt_entry(uint8_t vector, void* handler, uint8_t dpl) {
 void idt_init() {
     load_idt(idt);
     
-    for (int i = 0; i < IDT_SIZE; i++)
-        set_idt_entry(i, vector_0_handler + (i * DESCRIPTOR_BYTES), 0);
+    for (int i = 0; i < IDT_SIZE; i++) {
+        uint8_t dpl = 0;
+
+        if (i == 0x80) {
+            dpl = 3;
+        }
+
+        set_idt_entry(i, vector_0_handler + (i * DESCRIPTOR_BYTES), dpl);
+    }
     
     asm volatile ("sti");
 }
@@ -130,6 +138,11 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
             log_fault_context("PAGE_FAULT", context);
             log_page_fault_details(context);
             panic_halt();
+            break;
+        }
+
+        case 0x80: {
+            ctx = syscall_dispatch(context);
             break;
         }
         
@@ -154,6 +167,6 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
         }
     }
 
-    if (context->vector_number >= 32) apic_eoi();
+    if (context->vector_number >= 32 && context->vector_number != 0x80) apic_eoi();
     return ctx;
 }

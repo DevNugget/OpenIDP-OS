@@ -2,7 +2,7 @@
 
 APP := lscpu
 CC ?= cc
-CFLAGS := -g -O2 -Wall -Wextra -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie
+CFLAGS := -g -O2 -Wall -Wextra -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -I../../
 LDFLAGS := -nostdlib -static -no-pie -T linker.ld
 
 SRC := lscpu.c

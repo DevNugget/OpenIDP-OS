@@ -110,6 +110,7 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
 
     write_cr3(target_cr3);
 
+    virt_addr_t last_mapped_page = 0;
     for (uint16_t i = 0; i < hdr->e_phnum; i++) {
         const elf64_program_header_t* phdr = &program_headers[i];
 
@@ -135,7 +136,12 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
         virt_addr_t seg_end = (virt_addr_t)ALIGN_UP(phdr->p_vaddr + phdr->p_memsz, PAGE_SIZE);
         uint64_t pt_flags = elf_pflags_to_pt_flags(phdr->p_flags);
 
+
         for (virt_addr_t page = seg_start; page < seg_end; page += PAGE_SIZE) {
+            if (page < last_mapped_page && last_mapped_page != 0) {
+                continue; 
+            }
+
             phys_addr_t phys = pmm_alloc(1);
             if (phys == 0) {
                 write_cr3(current_cr3);
@@ -145,6 +151,7 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
             vmm_map_page((phys_addr_t*)process->pml4, page, phys, pt_flags|PT_FLAG_WRITE);
             
             memset((void*)page, 0, PAGE_SIZE);
+            last_mapped_page = page + PAGE_SIZE;
         }
 
         memcpy((void*)(uintptr_t)phdr->p_vaddr, image_bytes + phdr->p_offset, phdr->p_filesz);

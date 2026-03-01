@@ -46,5 +46,6 @@ typedef struct tss64 {
 
 void gdt_init(void);
 void gdt_init_cpu(size_t cpu_index);
+void gdt_set_tss_rsp0(size_t cpu_index, uint64_t rsp0);
 
 #endif //GDT_H

@@ -335,6 +335,11 @@ static thread_t* pick_next_thread(size_t cpu_index, thread_t* current_thread) {
         return next_thread;
     }
 
+    if (current_thread != NULL && current_thread->status != THREAD_DEAD) {
+        current_thread->quantum_ticks = 0;
+        return current_thread;
+    }
+
     next_thread = idle_threads[cpu_index];
     if (next_thread == NULL && current_thread != NULL && current_thread->status != THREAD_DEAD) {
         current_thread->quantum_ticks = 0;
@@ -355,6 +360,12 @@ static void defer_current_if_needed(size_t cpu_index, thread_t* current_thread, 
 
     if (current_thread->status == THREAD_READY || current_thread->status == THREAD_DEAD) {
         deferred_threads[cpu_index] = current_thread;
+    }
+
+    if (current_thread != idle_threads[cpu_index]) {
+        if (current_thread->status == THREAD_READY || current_thread->status == THREAD_DEAD) {
+            deferred_threads[cpu_index] = current_thread;
+        }
     }
 
     save_simd_state(current_thread);

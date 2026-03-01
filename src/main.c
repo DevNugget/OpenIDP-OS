@@ -120,7 +120,7 @@ void kmain(void) {
     kheap_init();
     acpi_init();
     apic_init();
-    apic_timer_init(10);
+    apic_timer_init(100);
     smp_init();
     scheduler_create_init_processes();
     keyboard_init();

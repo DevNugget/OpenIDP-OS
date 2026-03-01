@@ -142,7 +142,8 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
                 return -1;
             }
 
-            vmm_map_page((phys_addr_t*)process->pml4, page, phys, pt_flags);
+            vmm_map_page((phys_addr_t*)process->pml4, page, phys, pt_flags|PT_FLAG_WRITE);
+            
             memset((void*)page, 0, PAGE_SIZE);
         }
 

@@ -22,6 +22,7 @@
 #define PROCESS_STACK_SIZE (64 * 1024)
 #define DEFAULT_TIME_SLICE_TICKS 4
 #define SIMD_STATE_SIZE 512
+#define KERNEL_CONTEXT_SIZE (sizeof(cpu_status_t) - (2 * sizeof(uint64_t)))
 
 #define USER_STACK_TOP 0x00007FFFFFFFE000ULL
 #define USER_STACK_PAGES 16
@@ -52,6 +53,7 @@ static spinlock_t run_queue_lock = SPINLOCK_INIT;
 static spinlock_t zombie_lock = SPINLOCK_INIT;
 static spinlock_t cpu_map_lock = SPINLOCK_INIT;
 static spinlock_t process_lock = SPINLOCK_INIT;
+static spinlock_t scheduler_init_lock = SPINLOCK_INIT;
 
 static int scheduler_initialized = 0;
 
@@ -79,7 +81,13 @@ static inline void restore_or_init_simd_state(thread_t* thread) {
 }
 
 static void scheduler_init_once(void) {
+    if (__atomic_load_n(&scheduler_initialized, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+
+    uint64_t init_flags = spinlock_lock_irqsave(&scheduler_init_lock);
     if (scheduler_initialized) {
+        spinlock_unlock_irqrestore(&scheduler_init_lock, init_flags);
         return;
     }
 
@@ -97,6 +105,7 @@ static void scheduler_init_once(void) {
 
     if (current_threads == NULL || idle_threads == NULL || deferred_threads == NULL || cpu_apic_ids == NULL) {
         scheduler_cpu_count = 1;
+        spinlock_unlock_irqrestore(&scheduler_init_lock, init_flags);
         return;
     }
 
@@ -105,7 +114,8 @@ static void scheduler_init_once(void) {
     memset(deferred_threads, 0, sizeof(thread_t*) * scheduler_cpu_count);
     memset(cpu_apic_ids, 0xFF, sizeof(uint32_t) * scheduler_cpu_count);
 
-    scheduler_initialized = 1;
+    __atomic_store_n(&scheduler_initialized, 1, __ATOMIC_RELEASE);
+    spinlock_unlock_irqrestore(&scheduler_init_lock, init_flags);
 }
 
 static inline size_t cpu_slot_index(void) {
@@ -653,17 +663,22 @@ process_t* create_user_process_from_elf(char* name, const void* elf_image, size_
         return NULL;
     }
 
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+
     uint64_t entry_point = 0;
     if (elf64_load_process_image(process, elf_image, elf_image_size, &entry_point) != 0) {
         destroy_failed_process(process);
+        spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
     if (create_user_thread(process, entry_point, 1) == NULL) {
         destroy_failed_process(process);
+        spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
+    spinlock_unlock_irqrestore(&process_lock, flags);
     return process;
 }
 
@@ -671,18 +686,24 @@ process_t* create_user_process_from_path(char* name, const char* path) {
     void* elf_image = NULL;
     size_t elf_size = 0;
 
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+
     if (read_vfs_file_all(path, &elf_image, &elf_size) != 0) {
+        spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
     process_t* process = create_user_process_from_elf(name, elf_image, elf_size);
     kfree(elf_image);
 
+    spinlock_unlock_irqrestore(&process_lock, flags);
     return process;
 }
 
 static void idle_thread_func(void* arg);
 static void reaper_thread_func(void* arg);
+
+volatile int scheduler_ready_flag = 0;
 
 void scheduler_create_init_processes(void) {
     process_t* kernel_process = create_process("system", NULL, NULL);
@@ -694,10 +715,12 @@ void scheduler_create_init_processes(void) {
     }
 
     create_thread(kernel_process, reaper_thread_func, NULL, 1);
+
+    //__atomic_store_n(&scheduler_ready_flag, 1, __ATOMIC_SEQ_CST);
 }
 
 static void idle_thread_func(void* arg) {
-    //serial_printf("[SCHED] Idle Process Started\n");
+    serial_printf("[SCHED] Idle Process Started\n");
     while (1) {
         asm volatile ("hlt");
     }

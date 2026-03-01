@@ -7,6 +7,7 @@
 #include <utility/hhdm.h>
 #include <utility/kstring.h>
 #include <utility/kascii.h>
+#include <utility/cpu_state.h>
 
 #include <drivers/com1.h>
 #include <drivers/acpi.h>
@@ -27,6 +28,8 @@
 
 #include <multitasking/scheduler.h>
 #include <multitasking/smp.h>
+
+#include <syscall/syscall.h>
 
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(4);
@@ -62,7 +65,7 @@ void worker_1(void* arg) {
     while (true) {
         for (volatile int i = 0; i < 10000000; i++); 
         
-        serial_printf("Worker 1 is running...\n");
+        serial_printf("Worker 1 is running on CPU %u...\n", apic_get_id());
     }
 }
 
@@ -72,7 +75,7 @@ void worker_2(void* arg) {
     while (true) {
         for (volatile int i = 0; i < 10000000; i++); 
         
-        serial_printf("Worker 2 is running...\n");
+        serial_printf("Worker 2 is running on CPU %u...\n", apic_get_id());
     }
 }
 
@@ -119,6 +122,7 @@ void kmain(void) {
     apic_init();
     apic_timer_init(10);
     smp_init();
+    scheduler_create_init_processes();
     keyboard_init();
     pci_init();
     nvme_init();
@@ -138,10 +142,9 @@ void kmain(void) {
         fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
     }
 
-    scheduler_create_init_processes();
-    //create_process("worker1", worker_1, "TestArg");
-    //create_process("worker2", worker_2, "TestArg");
-    //create_user_process_from_path("user_hello", "/nvme/bin/hello.elf");
+    create_process("worker1", worker_1, "TestArg");
+    create_process("worker2", worker_2, "TestArg");
+    create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
 
     hcf();
 }

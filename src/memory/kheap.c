@@ -4,12 +4,15 @@
 #include <drivers/com1.h>
 #include <utility/align.h>
 #include <utility/kstring.h>
+#include <utility/spinlock.h>
 
 #define KERNEL_HEAP_PADDING 0x200000
 #define MINIMUM_EXPAND_PAGES 8
 #define SLAB_MAGIC 0x534C4142u
 #define LARGE_MAGIC 0x4C415247u
 #define MAX_SLAB_CLASSES 8
+
+static spinlock_t heap_lock = SPINLOCK_INIT;
 
 typedef struct slab_page {
     uint32_t magic;
@@ -241,8 +244,10 @@ void* kmalloc(size_t size) {
         return NULL;
     }
 
+    uint64_t flags = spinlock_lock_irqsave(&heap_lock);
     for (uint16_t i = 0; i < MAX_SLAB_CLASSES; i++) {
         if (size <= slab_classes[i].object_size) {
+            spinlock_unlock_irqrestore(&heap_lock, flags);
             return slab_alloc(i);
         }
     }
@@ -256,6 +261,7 @@ void* kmalloc(size_t size) {
     header->page_count = pages;
     header->requested_size = size;
 
+    spinlock_unlock_irqrestore(&heap_lock, flags);
     return (void*)((uintptr_t)header + sizeof(large_alloc_header_t));
 }
 
@@ -264,19 +270,24 @@ void kfree(void* ptr) {
         return;
     }
 
+    uint64_t flags = spinlock_lock_irqsave(&heap_lock);
+
     virt_addr_t page_base = page_align_down((virt_addr_t)ptr);
     uint32_t magic = *(uint32_t*)page_base;
 
     if (magic == SLAB_MAGIC) {
         slab_free(ptr);
+        spinlock_unlock_irqrestore(&heap_lock, flags);
         return;
     }
 
     if (magic == LARGE_MAGIC) {
         large_alloc_header_t* header = (large_alloc_header_t*)page_base;
         header->magic = 0;
+        spinlock_unlock_irqrestore(&heap_lock, flags);
         return;
     }
 
+    spinlock_unlock_irqrestore(&heap_lock, flags);
     serial_printf("[KHEAP](kfree) Unknown allocation type for pointer 0x%x\n", (uint64_t)ptr);
 }

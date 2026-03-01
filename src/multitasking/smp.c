@@ -21,6 +21,7 @@ static void smp_ap_entry(struct limine_mp_info* info) {
     size_t cpu_index = (size_t)info->extra_argument;
 
     gdt_init_cpu(cpu_index);
+    
     idt_init_cpu();
     apic_enable_local();
     apic_timer_start(10);

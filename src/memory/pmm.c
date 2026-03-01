@@ -1,6 +1,7 @@
 #include <memory/pmm.h>
 #include <drivers/com1.h>
 #include <utility/kstring.h>
+#include <utility/spinlock.h>
 #include <limine.h>
 
 __attribute__((used, section(".limine_requests")))
@@ -20,6 +21,8 @@ static volatile struct limine_executable_file_request executable_file_request = 
     .id = LIMINE_EXECUTABLE_FILE_REQUEST_ID,
     .revision = 0
 };
+
+static spinlock_t pmm_lock = SPINLOCK_INIT;
 
 static inline uint64_t bitmap_idx(uint64_t x, uint64_t y) {
     return ((x * BITS_PER_ROW) + y);
@@ -190,6 +193,8 @@ phys_addr_t pmm_alloc(size_t frame_count) {
     uint64_t start_bit = 0;
     uint64_t free_count = 0;
 
+    uint64_t flags = spinlock_lock_irqsave(&pmm_lock);
+
     for (uint64_t i = 0; i < total_pages; i++) {
         if (!bitmap_test(i)) {
             if (free_count == 0) {
@@ -210,6 +215,7 @@ phys_addr_t pmm_alloc(size_t frame_count) {
                     ((used_pages % 256) * 4), pages_to_mib(total_pages), ((total_pages % 256) * 4)
                 );
                 */
+                spinlock_unlock_irqrestore(&pmm_lock, flags);
                 return address;
             }
         } else {
@@ -217,15 +223,19 @@ phys_addr_t pmm_alloc(size_t frame_count) {
         }
     }
 
+    spinlock_unlock_irqrestore(&pmm_lock, flags);
     return 0x0;
 }
 
 void pmm_free(phys_addr_t addr, size_t frame_count) {
+    uint64_t flags = spinlock_lock_irqsave(&pmm_lock);
     uint64_t start_idx = bitmap_location(addr);
 
     for (uint64_t i = 0; i < frame_count; i++) {
         bitmap_unset(start_idx + i);
     }
+
+    spinlock_unlock_irqrestore(&pmm_lock, flags);
     /*
     serial_printf(
         "[PMM](pmm_free) Usage after %u page free: (%u pages/%u pages) (%u.%u MiB/%u.%u MiB)\n",

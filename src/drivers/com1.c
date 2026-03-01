@@ -37,7 +37,6 @@ int serial_init() {
     return 0;
 }
 
-/* Internal unlocked helper functions */
 static void _serial_write_str(const char* str) {
     for (int i = 0; str[i] != '\0'; i++) {
         outportb(PORT, str[i]);
@@ -100,7 +99,6 @@ static void _serial_u64_hex(uint64_t n) {
     _serial_write_str(n_str);
 }
 
-/* Public Locked API */
 void serial_write_str(char* str) {
     uint64_t flags = spinlock_lock_irqsave(&serial_lock);
     _serial_write_str(str);

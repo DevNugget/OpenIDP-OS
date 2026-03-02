@@ -15,6 +15,7 @@
 #include <drivers/pci.h>
 #include <drivers/keyboard.h>
 #include <drivers/nvme.h>
+#include <drivers/framebuffer.h>
 
 #include <fs/vfs.h>
 #include <fs/fatfs_adapter.h>
@@ -33,12 +34,6 @@
 
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(4);
-
-__attribute__((used, section(".limine_requests")))
-static volatile struct limine_framebuffer_request framebuffer_request = {
-    .id = LIMINE_FRAMEBUFFER_REQUEST_ID,
-    .revision = 0
-};
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;
@@ -130,21 +125,13 @@ void kmain(void) {
     fatfs_mount_nvme("/nvme");
     test_read_file();
     
-    if (framebuffer_request.response == NULL
-        || framebuffer_request.response->framebuffer_count < 1) {
-        hcf();
-    }
-    
-    struct limine_framebuffer *framebuffer = framebuffer_request.response->framebuffers[0];
-    
-    for (size_t i = 0; i < 100; i++) {
-        volatile uint32_t *fb_ptr = framebuffer->address;
-        fb_ptr[i * (framebuffer->pitch / 4) + i] = 0xffffff;
+    if (framebuffer_init_shared_memory() != 0) {
+        serial_write_str("[KERNEL] framebuffer shared memory init failed\n");
     }
 
     //create_process("worker1", worker_1, "TestArg");
     //create_process("worker2", worker_2, "TestArg");
-    create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
+    create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf");
     create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
 
     hcf();

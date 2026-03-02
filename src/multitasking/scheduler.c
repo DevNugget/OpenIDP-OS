@@ -25,6 +25,7 @@
 #define KERNEL_CONTEXT_SIZE (sizeof(cpu_status_t) - (2 * sizeof(uint64_t)))
 
 #define USER_STACK_TOP 0x00007FFFFFFFE000ULL
+#define USER_SHM_BASE  0x0000600000000000ULL
 #define USER_STACK_PAGES 16
 #define USER_STACK_GUARD_PAGES 1
 #define USER_PROCESS_FILE_CHUNK 1024
@@ -41,6 +42,7 @@ static thread_t** current_threads = NULL;
 static thread_t** idle_threads = NULL;
 static thread_t** deferred_threads = NULL;
 static uint32_t* cpu_apic_ids = NULL;
+
 static size_t cpu_slots_used = 0;
 static size_t scheduler_cpu_count = 1;
 
@@ -596,6 +598,7 @@ process_t* create_process(char* name, void(*function)(void*), void* arg) {
 
     uint64_t flags = spinlock_lock_irqsave(&process_lock);
     process->pid = next_pid++;
+    process->shm_next_base = USER_SHM_BASE;
     process->next = processes_list;
     processes_list = process;
     spinlock_unlock_irqrestore(&process_lock, flags);

@@ -16,12 +16,15 @@ typedef enum {
 } thread_status_t;
 
 struct thread_t;
+struct shm_mapping_t;
 
 typedef struct process_t {
     size_t pid;
     char name[PROC_NAME_LEN];
     virt_addr_t* pml4;
     struct thread_t* threads;
+    struct shm_mapping_t* shm_mappings;
+    virt_addr_t shm_next_base;
     struct process_t* next;
 } process_t;
 

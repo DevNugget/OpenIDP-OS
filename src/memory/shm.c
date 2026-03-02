@@ -189,6 +189,7 @@ int shm_map(process_t* process, uint64_t handle, uint64_t* out_addr) {
     process->shm_next_base = base + size_bytes;
     segment->ref_count++;
 
+    write_cr3(read_cr3());
     spinlock_unlock_irqrestore(&shm_lock, flags);
 
     *out_addr = base;

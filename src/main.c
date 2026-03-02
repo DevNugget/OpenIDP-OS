@@ -115,7 +115,7 @@ void kmain(void) {
     kheap_init();
     acpi_init();
     apic_init();
-    apic_timer_init(100);
+    
     smp_init();
     scheduler_create_init_processes();
     keyboard_init();
@@ -134,5 +134,6 @@ void kmain(void) {
     create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf");
     create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
 
+    apic_timer_init(100);
     hcf();
 }

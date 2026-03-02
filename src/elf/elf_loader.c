@@ -102,6 +102,9 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
         return -1;
     }
 
+    uint64_t rflags;
+    asm volatile("pushfq; pop %0; cli" : "=r"(rflags));
+
     const uint8_t* image_bytes = (const uint8_t*)image;
     const elf64_program_header_t* program_headers = (const elf64_program_header_t*)(image_bytes + hdr->e_phoff);
 
@@ -124,11 +127,13 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
 
         if (phdr->p_offset > image_size || phdr->p_filesz > image_size || phdr->p_offset + phdr->p_filesz > image_size) {
             write_cr3(current_cr3);
+            asm volatile("push %0; popfq" :: "r"(rflags));
             return -1;
         }
 
         if (phdr->p_vaddr + phdr->p_memsz < phdr->p_vaddr) {
             write_cr3(current_cr3);
+            asm volatile("push %0; popfq" :: "r"(rflags));
             return -1;
         }
 
@@ -145,6 +150,7 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
             phys_addr_t phys = pmm_alloc(1);
             if (phys == 0) {
                 write_cr3(current_cr3);
+                asm volatile("push %0; popfq" :: "r"(rflags));
                 return -1;
             }
 
@@ -160,5 +166,6 @@ int elf64_load_process_image(process_t* process, const void* image, size_t image
     write_cr3(current_cr3);
 
     *out_entry_point = hdr->e_entry;
+    asm volatile("push %0; popfq" :: "r"(rflags));
     return 0;
 }

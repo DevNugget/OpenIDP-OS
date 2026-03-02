@@ -1,38 +1,52 @@
 #include <libidp/syscall.h>
+#include <libgfx/gfx.h>
 
-static inline uint32_t make_rgb(uint8_t r, uint8_t g, uint8_t b) {
-    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+static void render_demo(gfx_context_t* gfx) {
+    gfx_clear(gfx, gfx_rgb(12, 16, 28));
+
+    uint64_t panel_w = gfx->width / 2;
+    uint64_t panel_h = gfx->height / 2;
+    int32_t panel_x = (int32_t)((gfx->width - panel_w) / 2);
+    int32_t panel_y = (int32_t)((gfx->height - panel_h) / 2);
+
+    gfx_fill_rect(
+        gfx, panel_x, panel_y, (int32_t)panel_w, 
+        (int32_t)panel_h, gfx_rgb(24, 31, 52)
+    );
+    gfx_draw_rect(
+        gfx, panel_x, panel_y, (int32_t)panel_w, 
+        (int32_t)panel_h, gfx_rgb(90, 132, 255)
+    );
+
+    gfx_draw_line(
+        gfx, panel_x, panel_y,
+        panel_x + (int32_t)panel_w - 1,
+        panel_y + (int32_t)panel_h - 1,
+        gfx_rgb(220, 80, 90)
+    );
+
+    gfx_draw_line(
+        gfx, panel_x + (int32_t)panel_w - 1, panel_y,
+        panel_x, panel_y + (int32_t)panel_h - 1,
+        gfx_rgb(60, 220, 120)
+    );
+
+    for (uint64_t x = 0; x < gfx->width; ++x) {
+        uint8_t shade = (uint8_t)((x * 255) / (gfx->width ? gfx->width : 1));
+        gfx_put_pixel(gfx, (int32_t)x, 0, gfx_rgb(shade, shade, 255));
+    }
 }
 
-void _start(void) {
-    framebuffer_user_info_t fb;
-    if (sys_framebuffer_get_info(&fb) != 0) {
-        sys_print("idpwm: failed to get framebuffer info\n");
+void main() {
+    gfx_context_t gfx = {0};
+
+    if (gfx_init(&gfx) != ERR_SUCCESS) {
+        sys_print("[IDPWM] libgfx initialization failed!\n");
         sys_exit(1);
     }
 
-    if (fb.bpp != 32) {
-        sys_print("idpwm: only 32bpp framebuffers are currently supported\n");
-        sys_exit(2);
-    }
-
-    volatile uint32_t* pixels = (volatile uint32_t*)sys_shm_map(fb.shm_handle);
-    if ((uint64_t)pixels == (uint64_t)-1) {
-        sys_print("idpwm: failed to map framebuffer shared memory\n");
-        sys_exit(3);
-    }
-
-    uint64_t stride = fb.pitch / 4;
-    for (uint64_t y = 0; y < fb.height; ++y) {
-        for (uint64_t x = 0; x < fb.width; ++x) {
-            uint8_t r = (uint8_t)((x * 255) / (fb.width ? fb.width : 1));
-            uint8_t g = (uint8_t)((y * 255) / (fb.height ? fb.height : 1));
-            uint8_t b = 0x40;
-            pixels[y * stride + x] = make_rgb(r, g, b);
-        }
-    }
-
-    sys_print("idpwm: framebuffer gradient rendered via shared memory\n");
+    render_demo(&gfx);
+    gfx_present(&gfx);
 
     for (;;) {
         sys_yield();

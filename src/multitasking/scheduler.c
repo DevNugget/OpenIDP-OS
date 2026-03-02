@@ -42,7 +42,6 @@ static thread_t** current_threads = NULL;
 static thread_t** idle_threads = NULL;
 static thread_t** deferred_threads = NULL;
 static uint32_t* cpu_apic_ids = NULL;
-
 static size_t cpu_slots_used = 0;
 static size_t scheduler_cpu_count = 1;
 

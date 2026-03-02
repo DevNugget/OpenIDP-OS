@@ -28,6 +28,7 @@ static void smp_ap_entry(struct limine_mp_info* info) {
 
     __atomic_add_fetch(&smp_online_cpus, 1, __ATOMIC_SEQ_CST);
 
+    asm volatile ("sti");
     for (;;) {
         asm volatile ("hlt");
     }

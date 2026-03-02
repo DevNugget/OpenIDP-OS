@@ -14,6 +14,7 @@
 #include <drivers/apic.h>
 #include <drivers/pci.h>
 #include <drivers/keyboard.h>
+#include <drivers/mouse.h>
 #include <drivers/nvme.h>
 #include <drivers/framebuffer.h>
 
@@ -115,10 +116,10 @@ void kmain(void) {
     kheap_init();
     acpi_init();
     apic_init();
-    
     smp_init();
     scheduler_create_init_processes();
     keyboard_init();
+    //mouse_init();
     pci_init();
     nvme_init();
     vfs_init();
@@ -132,8 +133,8 @@ void kmain(void) {
     //create_process("worker1", worker_1, "TestArg");
     //create_process("worker2", worker_2, "TestArg");
     create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf");
-    create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
-
+    //create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
     apic_timer_init(100);
+    
     hcf();
 }

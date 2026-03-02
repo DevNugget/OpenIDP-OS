@@ -11,6 +11,10 @@
 #define SYS_SHM_UNMAP 5
 #define SYS_SHM_DESTROY 6
 #define SYS_FRAMEBUFFER_GET_INFO 7
+#define SYS_KEYBOARD_POLL 8
+#define SYS_KEYBOARD_READ 9
+#define SYS_MOUSE_POLL 10
+#define SYS_MOUSE_READ 11
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
@@ -23,6 +27,75 @@ typedef struct framebuffer_user_info_t {
     uint64_t size_bytes;
     uint64_t shm_handle;
 } framebuffer_user_info_t;
+
+typedef struct mouse_event_user_t {
+    int16_t delta_x;
+    int16_t delta_y;
+    uint8_t buttons;
+} mouse_event_user_t;
+
+#define CTRL_MASK  (1u << 0)
+#define ALT_MASK   (1u << 1)
+#define SHIFT_MASK (1u << 2)
+#define CAPS_MASK  (1u << 3)
+
+typedef enum {
+    KEY_UNKNOWN = 0,
+
+    KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H,
+    KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P,
+    KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X,
+    KEY_Y, KEY_Z,
+
+    KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0,
+
+    KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, 
+    KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+
+    KEY_MINUS,      
+    KEY_EQUAL,      
+    KEY_LBRACKET,   
+    KEY_RBRACKET,   
+    KEY_SEMICOLON,  
+    KEY_QUOTE,      
+    KEY_BACKTICK,   
+    KEY_BACKSLASH,  
+    KEY_COMMA,      
+    KEY_DOT,        
+    KEY_SLASH,      
+
+    KEY_BACKSPACE,
+    KEY_ENTER,
+    KEY_TAB,
+    KEY_SPACE,
+    KEY_ESC,
+    
+    KEY_LSHIFT, KEY_RSHIFT,
+    KEY_LCTRL,  KEY_RCTRL,
+    KEY_LALT,   KEY_RALT,
+    
+    KEY_CAPSLOCK,
+    KEY_NUMLOCK,
+    KEY_SCROLLLOCK,
+
+    KEY_INSERT, KEY_DELETE,
+    KEY_HOME,   KEY_END,
+    KEY_PGUP,   KEY_PGDN,
+    KEY_UP,     KEY_DOWN, 
+    KEY_LEFT,   KEY_RIGHT,
+
+    KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4,
+    KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9,
+    KEY_KP_ADD, KEY_KP_SUB, KEY_KP_MUL, KEY_KP_DIV, 
+    KEY_KP_DECIMAL, KEY_KP_ENTER
+} keycode_t;
+
+typedef struct key_event_t {
+    uint8_t code;
+    uint8_t status_mask;
+    uint8_t is_pressed;
+} key_event_t;
+
 
 static inline uint64_t syscall_0(uint64_t syscall_num) {
     uint64_t ret;
@@ -91,6 +164,22 @@ static inline int sys_shm_destroy(uint64_t handle) {
 
 static inline int sys_framebuffer_get_info(framebuffer_user_info_t* out_info) {
     return (int)syscall_1(SYS_FRAMEBUFFER_GET_INFO, (uint64_t)out_info);
+}
+
+static inline int sys_keyboard_poll(void) {
+    return (int)syscall_0(SYS_KEYBOARD_POLL);
+}
+
+static inline int sys_keyboard_read(key_event_t* out_event) {
+    return (int)syscall_1(SYS_KEYBOARD_READ, (uint64_t)out_event);
+}
+
+static inline int sys_mouse_poll(void) {
+    return (int)syscall_0(SYS_MOUSE_POLL);
+}
+
+static inline int sys_mouse_read(mouse_event_user_t* out_event) {
+    return (int)syscall_1(SYS_MOUSE_READ, (uint64_t)out_event);
 }
 
 #endif

@@ -3,6 +3,7 @@
 #include <drivers/com1.h>
 #include <drivers/apic.h>
 #include <drivers/keyboard.h>
+#include <drivers/mouse.h>
 #include <utility/cpu_state.h>
 #include <multitasking/scheduler.h>
 #include <syscall/syscall.h>
@@ -158,6 +159,11 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
 
         case 0x21: {
             keyboard_driver_irq_handler();
+            break;
+        }
+
+        case 0x2C: {
+            mouse_driver_irq_handler();
             break;
         }
         

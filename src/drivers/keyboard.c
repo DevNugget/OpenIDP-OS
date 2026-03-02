@@ -33,6 +33,10 @@ uint8_t buf_write_pos;
 uint8_t buf_read_pos;
 
 void keyboard_init() {
+    outportb(0x64, 0xAE);
+    while (inportb(0x64) & 1) {
+        inportb(0x60);
+    }
     io_apic_map_irq(1, 0x21);
     memset(kb_buffer, 0, sizeof(key_event_t) * BUFFER_SIZE);
     state = NORMAL_STATE;
@@ -77,17 +81,15 @@ void keyboard_driver_irq_handler() {
 
     update_modifiers(k_code, !is_break);
 
-    if (!is_break) {
-        key_event_t event;
-        event.code = k_code;
-        event.status_mask = current_modifiers;
-        event.is_pressed = true;
+    key_event_t event;
+    event.code = k_code;
+    event.status_mask = current_modifiers;
+    event.is_pressed = !is_break;
 
-        uint8_t next_pos = (buf_write_pos + 1) % BUFFER_SIZE;
-        if (next_pos != buf_read_pos) { 
-            kb_buffer[buf_write_pos] = event;
-            buf_write_pos = next_pos;
-        }
+    uint8_t next_pos = (buf_write_pos + 1) % BUFFER_SIZE;
+    if (next_pos != buf_read_pos) {
+        kb_buffer[buf_write_pos] = event;
+        buf_write_pos = next_pos;
     }
 }
 

@@ -1,6 +1,8 @@
 #include <syscall/syscall.h>
 #include <drivers/com1.h>
 #include <drivers/framebuffer.h>
+#include <drivers/keyboard.h>
+#include <drivers/mouse.h>
 #include <multitasking/scheduler.h>
 #include <memory/shm.h>
 
@@ -89,6 +91,43 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             break;
         }
         
+        case SYS_KEYBOARD_POLL: {
+            context->rax = keyboard_poll() ? 1 : 0;
+            break;
+        }
+
+        case SYS_KEYBOARD_READ: {
+            key_event_t* out_event = (key_event_t*)context->rdi;
+            if (out_event == NULL || !keyboard_poll()) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            *out_event = keyboard_read();
+            context->rax = ERR_SUCCESS;
+            break;
+        }
+
+        case SYS_MOUSE_POLL: {
+            context->rax = mouse_poll() ? 1 : 0;
+            break;
+        }
+
+        case SYS_MOUSE_READ: {
+            syscall_mouse_event_t* out_event = (syscall_mouse_event_t*)context->rdi;
+            if (out_event == NULL || !mouse_poll()) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            mouse_event_t event = mouse_read();
+            out_event->delta_x = event.delta_x;
+            out_event->delta_y = event.delta_y;
+            out_event->buttons = event.buttons;
+            context->rax = ERR_SUCCESS;
+            break;
+        }
+
         default:
             serial_printf("[SYSCALL] Unknown syscall number: %u\n", (uint32_t)syscall_num);
             context->rax = (uint64_t)ERR_FAIL; 

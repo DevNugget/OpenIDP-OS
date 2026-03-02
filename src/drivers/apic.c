@@ -71,7 +71,7 @@ void apic_init() {
         lapic_phys, lapic_virt
     );
     
-    vmm_map_page(kernel_pml4, lapic_virt, lapic_phys, PT_FLAG_PRESENT | PT_FLAG_WRITE);
+    vmm_map_page(kernel_pml4, lapic_virt, lapic_phys, PT_FLAG_PRESENT | PT_FLAG_WRITE | PT_FLAG_PCD | PT_FLAG_PWT);
 
     lapic_regs = (volatile uint32_t*)lapic_virt;
     apic_enable_local();
@@ -92,10 +92,14 @@ void io_apic_map_irq(uint8_t pin, uint8_t vector) {
     uint32_t low_index = 0x10 + (pin * 2);
     uint32_t high_index = 0x11 + (pin * 2);
 
-    io_apic_write(high_index, 0);
+    uint32_t destination = apic_get_id();
+    io_apic_write(high_index, destination << 24);
 
-    uint32_t low_part = vector; 
+    uint32_t low_part = (uint32_t)vector;
     io_apic_write(low_index, low_part);
+
+    serial_printf("[APIC] IRQ pin %u mapped to vector 0x%x dest APIC %u\n",
+                  pin, vector, destination);
 }
 
 // Called from acpi.c

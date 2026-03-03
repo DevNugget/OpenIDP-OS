@@ -42,7 +42,13 @@ typedef struct {
     uint8_t dirty;
 } wm_state_t;
 
+gfx_font_t g_title_font;
+
 static uint32_t palette[] = {
+    0x1e1e2e, // base
+    0xb4befe, // lavender
+    0x6c7086, // overlay 0
+    0x585b70, // surface 2
     0x2A9D8F, 0xE76F51, 0x457B9D, 0xF4A261,
     0x8D99AE, 0xB56576, 0x5E60CE, 0x6A994E
 };
@@ -63,19 +69,29 @@ static uint32_t shade(uint32_t color, uint8_t amount) {
 static void draw_client(wm_state_t* wm, uint8_t idx) {
     wm_client_t* c = &wm->clients[idx];
     uint8_t focused = idx == wm->focused_index;
-    uint32_t border = focused ? gfx_rgb(120, 184, 255) : gfx_rgb(52, 76, 112);
+    uint32_t border = focused ? palette[1] : palette[2];
 
-    gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, c->frame.h, shade(c->color, 10));
-    gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, 18, shade(c->color, 38));
+    int32_t padding = 4;
+    int32_t tb_h = (g_title_font.height > 0 ? g_title_font.height : 10) + padding;
+    gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, c->frame.h, palette[0]);
+    gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, tb_h, palette[3]);
 
     for (int32_t i = 0; i < IDPWM_BORDER_WIDTH; ++i) {
         gfx_draw_rect(wm->gfx, c->frame.x + i, c->frame.y + i, c->frame.w - (i * 2), c->frame.h - (i * 2), border);
     }
 
+    int text_x = c->frame.x + IDPWM_BORDER_WIDTH + 4;
+    int text_y = c->frame.y + (padding / 1);
+    if (c->ipc && c->ipc->title[0] != '\0') {
+        gfx_draw_string(wm->gfx, &g_title_font, c->ipc->title, text_x, text_y, palette[0]);
+    } else {
+        gfx_draw_string(wm->gfx, &g_title_font, "Window", text_x, text_y, palette[0]);
+    }
+
     int32_t cx = c->frame.x + IDPWM_BORDER_WIDTH;
-    int32_t cy = c->frame.y + 18;
+    int32_t cy = c->frame.y + tb_h;
     int32_t cw = c->frame.w - (IDPWM_BORDER_WIDTH * 2);
-    int32_t ch = c->frame.h - 18 - IDPWM_BORDER_WIDTH;
+    int32_t ch = c->frame.h - tb_h - IDPWM_BORDER_WIDTH;
 
     if (cw <= 0 || ch <= 0 || !c->ipc) return;
 
@@ -367,6 +383,10 @@ void main() {
         sys_exit(1);
     }
 
+    if (gfx_load_font("/nvme/fonts/kryptonbold.psf", &g_title_font) != 0) {
+        sys_print("[IDPWM] Failed to load window title font\n");
+    }
+
     wm.gfx = &gfx;
     wm.layout = LAYOUT_MASTER_STACK;
     wm.master_ratio_percent = 50;
@@ -385,23 +405,18 @@ void main() {
         }
 
         int needs_render = wm.dirty;
+        wm.dirty = 0;
+        
         for (uint8_t i = 0; i < wm.client_count; ++i) {
             if (wm.clients[i].ipc && wm.clients[i].ipc->dirty) {
                 needs_render = 1;
-                break;
+                wm.clients[i].ipc->dirty = 0;
             }
         }
 
         if (needs_render) {
             wm_arrange(&wm);
             wm_render(&wm);
-            
-            wm.dirty = 0;
-            for (uint8_t i = 0; i < wm.client_count; ++i) {
-                if (wm.clients[i].ipc) {
-                    wm.clients[i].ipc->dirty = 0;
-                }
-            }
         }
         
         sys_yield();

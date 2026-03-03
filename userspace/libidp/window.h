@@ -8,6 +8,8 @@
 #define WINDOW_MAX_WIDTH 1920
 #define WINDOW_MAX_HEIGHT 1080
 
+#define WINDOW_TITLE_MAX 128
+
 typedef struct {
     uint32_t width;
     uint32_t height;
@@ -17,6 +19,7 @@ typedef struct {
     uint8_t key_head;
     uint8_t key_tail;
 
+    char title[WINDOW_TITLE_MAX];
     volatile uint8_t dirty;
 
     uint32_t pixels[]; 

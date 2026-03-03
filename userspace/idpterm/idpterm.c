@@ -36,6 +36,15 @@ typedef struct {
 
 static uint8_t g_font_storage[FONT_MAX_BYTES];
 
+static uint32_t palette[] = {
+    0x1e1e2e, // base
+    0xb4befe, // lavender
+    0x6c7086, // overlay 0
+    0x585b70, // surface 2
+    0x2A9D8F, 0xE76F51, 0x457B9D, 0xF4A261,
+    0x8D99AE, 0xB56576, 0x5E60CE, 0x6A994E
+};
+
 static int psf2_parse(const uint8_t* blob, size_t len, const uint8_t** glyphs, uint32_t* bpg, uint32_t* w, uint32_t* h) {
     if (len < sizeof(psf2_header_t)) { sys_print("psf2 err: file too small or empty\n"); return -1; }
     
@@ -106,25 +115,30 @@ static void term_scroll(term_t* t) {
 }
 
 static void term_putc(term_t* t, char ch) {
+    t->grid[t->row][t->col].dirty = 1;
+
     if (ch == '\n') { 
         t->col = 0; 
         t->row++; 
         if (t->row >= t->rows) term_scroll(t); 
-        return; 
     }
-    if (ch == '\r') { t->col = 0; return; }
-    if (ch == '\b') { 
+    else if (ch == '\r') { 
+        t->col = 0; 
+    }
+    else if (ch == '\b') { 
         if (t->col) t->col--; 
         t->grid[t->row][t->col] = (cell_t){' ', 15, 0, 1};
-        return; 
     }
-    
-    t->grid[t->row][t->col] = (cell_t){ch, 15, 0, 1};
-    if (++t->col >= t->cols) { 
-        t->col = 0; 
-        t->row++; 
-        if (t->row >= t->rows) term_scroll(t); 
+    else {
+        t->grid[t->row][t->col] = (cell_t){ch, 15, 0, 1};
+        if (++t->col >= t->cols) { 
+            t->col = 0; 
+            t->row++; 
+            if (t->row >= t->rows) term_scroll(t); 
+        }
     }
+
+    t->grid[t->row][t->col].dirty = 1;
 }
 
 static uint32_t color(uint8_t idx){ return idx?gfx_rgb(220,220,220):gfx_rgb(20,24,32); }
@@ -136,6 +150,12 @@ static void draw_cell(term_t* t, size_t r, size_t c) {
     
     uint32_t bg_color = color(cell.bg);
     uint32_t fg_color = color(cell.fg);
+
+    if (r == t->row && c == t->col) {
+        uint32_t temp = bg_color;
+        bg_color = fg_color;
+        fg_color = temp;
+    }
 
     gfx_fill_rect(t->gfx, x, y, t->glyph_w, t->glyph_h, bg_color);
     
@@ -218,6 +238,14 @@ void main(int argc, char** argv) {
 
     window_ipc_t* ipc = (window_ipc_t*)sys_shm_map(handle);
     if ((uint64_t)ipc == (uint64_t)-1) sys_exit(1);
+
+    const char* default_title = " idpterm - *";
+    int t_idx = 0;
+    while (default_title[t_idx] && t_idx < WINDOW_TITLE_MAX - 1) {
+        ipc->title[t_idx] = default_title[t_idx];
+        t_idx++;
+    }
+    ipc->title[t_idx] = '\0';
 
     gfx_context_t gfx;
     for (size_t i = 0; i < sizeof(gfx); ++i) ((uint8_t*)&gfx)[i] = 0;
@@ -334,11 +362,52 @@ void main(int argc, char** argv) {
         uint64_t rd = 0;
         sys_read(shell_out_r, buf, sizeof(buf), &rd);
         
+        static int ansi_state = 0;
+        static char title_buf[WINDOW_TITLE_MAX] = " idpterm - ";
+        static int title_len = 11;
+
         if (rd > 0) {
             for (uint64_t i = 0; i < rd; i++) {
-                term_putc(&term, buf[i]);
+                char c = buf[i];
+                
+                if (ansi_state == 0) {
+                    if (c == '\x1b') ansi_state = 1;
+                    else term_putc(&term, c);
+                } 
+                else if (ansi_state == 1) {
+                    if (c == ']') ansi_state = 2;
+                    else { ansi_state = 0; term_putc(&term, '\x1b'); term_putc(&term, c); }
+                } 
+                else if (ansi_state == 2) {
+                    if (c == '0' || c == '2') ansi_state = 3;
+                    else ansi_state = 0;
+                } 
+                else if (ansi_state == 3) {
+                    if (c == ';') { ansi_state = 4; title_len = 0; }
+                    else ansi_state = 0;
+                } 
+                else if (ansi_state == 4) {
+                    if (c == '\x07') {
+                        title_buf[title_len] = '\0';
+                        
+                        int t_idx = 11;
+                        while (title_buf[t_idx] && t_idx < WINDOW_TITLE_MAX - 1) {
+                            ipc->title[t_idx] = title_buf[t_idx];
+                            t_idx++;
+                        }
+                        ipc->title[t_idx] = '\0';
+                        
+                        ansi_state = 0;
+                        needs_render = 1;
+                    } else {
+                        if (title_len < WINDOW_TITLE_MAX - 1) {
+                            title_buf[title_len++] = c;
+                        }
+                    }
+                }
             }
-            needs_render = 1;
+            
+            if (ansi_state == 0) needs_render = 1; 
         }
         
         if (needs_render) {

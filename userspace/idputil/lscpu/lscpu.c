@@ -4,6 +4,8 @@
 void main(int argc, char** argv) {
     if (argc < 3) sys_exit(1);
     stdio_arginit(&argc, argv);
+
+    printf("\x1b]0;lscpu\x07");
     
     printf("I received %d real arguments from the shell:\n", argc);
     for (int i = 0; i < argc; i++) {

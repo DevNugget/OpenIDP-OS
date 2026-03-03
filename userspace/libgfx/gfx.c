@@ -216,3 +216,110 @@ void gfx_fill_rect(gfx_context_t* ctx, int32_t x, int32_t y, int32_t width, int3
         gfx_memset32(row, color, span);
     }
 }
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t headersize;
+    uint32_t flags;
+    uint32_t numglyph;
+    uint32_t bytesperglyph;
+    uint32_t height;
+    uint32_t width;
+} psf2_header_t;
+
+int gfx_load_font(const char* path, gfx_font_t* out_font) {
+    if (!path || !out_font) return -1;
+    
+    uint64_t fd = sys_open(path, IDP_O_RDONLY);
+    if (fd == (uint64_t)ERR_FAIL) return -1;
+
+    // Allocate SHM buffer for font data (256 KB max should cover most standard PSF2 fonts)
+    uint64_t shm = sys_shm_create(256 * 1024);
+    if ((int64_t)shm < 0) {
+        sys_close(fd);
+        return -1;
+    }
+
+    uint8_t* buf = (uint8_t*)sys_shm_map(shm);
+    if ((uint64_t)buf == (uint64_t)-1 || buf == NULL) {
+        sys_shm_destroy(shm);
+        sys_close(fd);
+        return -1;
+    }
+
+    size_t offset = 0;
+    while (offset < 256 * 1024) {
+        uint64_t rd = 0;
+        if (sys_read(fd, buf + offset, 256 * 1024 - offset, &rd) != ERR_SUCCESS) {
+            sys_shm_unmap(buf);
+            sys_shm_destroy(shm);
+            sys_close(fd);
+            return -1;
+        }
+        if (rd == 0) break;
+        offset += (size_t)rd;
+    }
+    sys_close(fd);
+
+    if (offset < sizeof(psf2_header_t)) {
+        sys_shm_unmap(buf);
+        sys_shm_destroy(shm);
+        return -1;
+    }
+
+    psf2_header_t* hdr = (psf2_header_t*)buf;
+    if (hdr->magic != 0x864ab572 || hdr->headersize >= offset) {
+        sys_shm_unmap(buf);
+        sys_shm_destroy(shm);
+        return -1;
+    }
+
+    out_font->base_buf = buf;
+    out_font->shm_handle = shm;
+    out_font->glyphs = buf + hdr->headersize;
+    out_font->bytes_per_glyph = hdr->bytesperglyph;
+    out_font->width = hdr->width;
+    out_font->height = hdr->height;
+
+    return 0;
+}
+
+void gfx_unload_font(gfx_font_t* font) {
+    if (!font || !font->base_buf) return;
+    sys_shm_unmap(font->base_buf);
+    sys_shm_destroy(font->shm_handle);
+    font->base_buf = NULL;
+    font->shm_handle = 0;
+}
+
+void gfx_draw_char(gfx_context_t* ctx, const gfx_font_t* font, char c, int32_t x, int32_t y, uint32_t color) {
+    if (!ctx || !ctx->back_buffer || !font || !font->glyphs) return;
+
+    const uint8_t* g = font->glyphs + ((uint8_t)c * font->bytes_per_glyph);
+    int bytes_per_row = (font->width + 7) / 8;
+
+    for (uint32_t gy = 0; gy < font->height; gy++) {
+        int32_t py = y + gy;
+        if (py < 0 || (uint64_t)py >= ctx->height) continue;
+        
+        for (uint32_t gx = 0; gx < font->width; gx++) {
+            int32_t px = x + gx;
+            if (px < 0 || (uint64_t)px >= ctx->width) continue;
+            
+            uint8_t byte = g[gy * bytes_per_row + (gx / 8)];
+            if (byte & (0x80 >> (gx % 8))) {
+                ctx->back_buffer[(uint64_t)py * ctx->stride_pixels + (uint64_t)px] = color;
+            }
+        }
+    }
+}
+
+void gfx_draw_string(gfx_context_t* ctx, const gfx_font_t* font, const char* str, int32_t x, int32_t y, uint32_t color) {
+    if (!font) return;
+    while (*str) {
+        gfx_draw_char(ctx, font, *str, x, y, color);
+        x += font->width;
+        str++;
+    }
+}

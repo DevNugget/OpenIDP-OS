@@ -55,6 +55,7 @@ void main(int argc, char** argv) {
     char* token_argv[MAX_TOKENS];
 
     while (1) {
+        //printf("\x1b]0;idpshell\x07");
         printf("idpshell$ ");
         read_line(line, sizeof(line));
         

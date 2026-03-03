@@ -15,6 +15,15 @@
 #define SYS_KEYBOARD_READ 9
 #define SYS_MOUSE_POLL 10
 #define SYS_MOUSE_READ 11
+#define SYS_GETPID 12
+#define SYS_SPAWN 13
+#define SYS_WAIT 14
+#define SYS_KILL 15
+#define SYS_FS_OPEN 16
+#define SYS_FS_READ 17
+#define SYS_FS_CLOSE 18
+#define SYS_PIPE 19
+#define SYS_FS_WRITE 20
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
@@ -130,6 +139,29 @@ static inline uint64_t syscall_2(uint64_t syscall_num, uint64_t arg1, uint64_t a
     return ret;
 }
 
+static inline uint64_t syscall_3(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+    uint64_t ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (syscall_num), "D" (arg1), "S" (arg2), "d" (arg3)
+        : "memory"
+    );
+    return ret;
+}
+
+static inline uint64_t syscall_4(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
+    uint64_t ret;
+    register uint64_t r10 __asm__("r10") = arg4;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a" (ret)
+        : "a" (syscall_num), "D" (arg1), "S" (arg2), "d" (arg3), "r" (r10)
+        : "memory"
+    );
+    return ret;
+}
+
 static inline int sys_yield(void) {
     return (int)syscall_0(SYS_YIELD);
 }
@@ -180,6 +212,44 @@ static inline int sys_mouse_poll(void) {
 
 static inline int sys_mouse_read(mouse_event_user_t* out_event) {
     return (int)syscall_1(SYS_MOUSE_READ, (uint64_t)out_event);
+}
+
+static inline int sys_getpid(void) {
+    return (int)syscall_0(SYS_GETPID);
+}
+
+static inline int sys_spawn(const char* path, const char** argv) {
+    return (int)syscall_2(SYS_SPAWN, (uint64_t)path, (uint64_t)argv);
+}
+
+static inline int sys_wait(int pid, int* out_exit_code) {
+    return (int)syscall_2(SYS_WAIT, (uint64_t)pid, (uint64_t)out_exit_code);
+}
+
+static inline int sys_kill(int pid) {
+    return (int)syscall_1(SYS_KILL, (uint64_t)pid);
+}
+
+#define IDP_O_RDONLY 0x1
+
+static inline uint64_t sys_open(const char* path, uint32_t flags) {
+    return (uint64_t)syscall_2(SYS_FS_OPEN, (uint64_t)path, (uint64_t)flags);
+}
+
+static inline int sys_read(uint64_t fd, void* buffer, uint64_t bytes, uint64_t* out_read) {
+    return (int)syscall_4(SYS_FS_READ, fd, (uint64_t)buffer, bytes, (uint64_t)out_read);
+}
+
+static inline int sys_close(uint64_t fd) {
+    return (int)syscall_1(SYS_FS_CLOSE, fd);
+}
+
+static inline int sys_pipe(uint64_t* read_fd, uint64_t* write_fd) {
+    return (int)syscall_2(SYS_PIPE, (uint64_t)read_fd, (uint64_t)write_fd);
+}
+
+static inline int sys_write(uint64_t fd, const void* buffer, uint64_t bytes, uint64_t* out_written) {
+    return (int)syscall_4(SYS_FS_WRITE, fd, (uint64_t)buffer, bytes, (uint64_t)out_written);
 }
 
 #endif

@@ -20,11 +20,17 @@ struct shm_mapping_t;
 
 typedef struct process_t {
     size_t pid;
+    size_t parent_pid;
     char name[PROC_NAME_LEN];
+    int exited;
+    int exit_code;
     virt_addr_t* pml4;
     struct thread_t* threads;
     struct shm_mapping_t* shm_mappings;
     virt_addr_t shm_next_base;
+    struct process_t* parent;
+    struct process_t* first_child;
+    struct process_t* next_sibling;
     struct process_t* next;
 } process_t;
 

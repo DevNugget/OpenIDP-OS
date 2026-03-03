@@ -20,6 +20,24 @@ typedef struct gfx_context_t {
     bool owns_back_buffer;
 } gfx_context_t;
 
+inline void gfx_memset32(uint32_t* dst, uint32_t value, uint64_t count) {
+    __asm__ volatile (
+        "rep stosl"
+        : "+D" (dst), "+c" (count)
+        : "a" (value)
+        : "memory"
+    );
+}
+
+inline void gfx_memcpy32(uint32_t* dst, const uint32_t* src, uint64_t count_u32) {
+    __asm__ volatile (
+        "rep movsl"
+        : "+D" (dst), "+S" (src), "+c" (count_u32)
+        :
+        : "memory"
+    );
+}
+
 int gfx_init(gfx_context_t* ctx);
 void gfx_shutdown(gfx_context_t* ctx);
 

@@ -5,9 +5,29 @@
 #include <drivers/mouse.h>
 #include <multitasking/scheduler.h>
 #include <memory/shm.h>
+#include <utility/kstring.h>
+#include <fs/vfs.h>
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL -1
+
+static int copy_user_string(char* dst, size_t dst_len, const char* src) {
+    if (dst == NULL || src == NULL || dst_len == 0) {
+        return ERR_FAIL;
+    }
+
+    for (size_t i = 0; i < dst_len - 1; ++i) {
+        char c = src[i];
+        dst[i] = c;
+        if (c == '\0') {
+            return ERR_SUCCESS;
+        }
+    }
+
+    dst[dst_len - 1] = '\0';
+    return ERR_FAIL;
+}
+
 
 cpu_status_t* syscall_dispatch(cpu_status_t* context) {
     uint64_t syscall_num = context->rax;
@@ -26,11 +46,9 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
 
         case SYS_EXIT: {
             uint64_t exit_code = context->rdi;
-            serial_printf("[SYSCALL] Thread exited with code %d\n", exit_code);
-            
-            thread_t* current = scheduler_current_thread();
-            if (current != NULL) {
-                current->status = THREAD_DEAD;
+            size_t current_pid = scheduler_current_pid();
+            if (current_pid != 0) {
+                scheduler_kill_process_tree(current_pid, (int)exit_code);
             }
             
             return schedule(context);
@@ -125,6 +143,119 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             out_event->delta_y = event.delta_y;
             out_event->buttons = event.buttons;
             context->rax = ERR_SUCCESS;
+            break;
+        }
+
+        case SYS_GETPID: {
+            context->rax = scheduler_current_pid();
+            break;
+        }
+
+        case SYS_SPAWN: {
+            size_t child_pid = 0;
+            const char* path = (const char*)context->rdi;
+            const char** argv = (const char**)context->rsi;
+            
+            int st = scheduler_spawn_process(path, argv, scheduler_current_pid(), &child_pid);
+            context->rax = (st == ERR_SUCCESS) ? child_pid : (uint64_t)ERR_FAIL;
+            break;
+        }
+
+        case SYS_WAIT: {
+            int* out_exit = (int*)context->rsi;
+            context->rax = (uint64_t)scheduler_wait_process(scheduler_current_pid(), context->rdi, out_exit);
+            break;
+        }
+
+        case SYS_KILL: {
+            context->rax = (uint64_t)scheduler_kill_process_tree(context->rdi, 137);
+            break;
+        }
+
+        case SYS_FS_OPEN: {
+            const char* path = (const char*)context->rdi;
+            serial_printf("%s\n", path);
+            uint32_t flags = (uint32_t)context->rsi;
+            vfs_file_t* file = NULL;
+            if (path == NULL || vfs_open(path, flags, &file) != VFS_OK || file == NULL) {
+                serial_printf("fail\n");
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            context->rax = (uint64_t)(uintptr_t)file;
+            serial_printf("%x\n", context->rax);
+            break;
+        }
+
+        case SYS_FS_READ: {
+            vfs_file_t* file = (vfs_file_t*)(uintptr_t)context->rdi;
+            void* buffer = (void*)context->rsi;
+            size_t bytes = (size_t)context->rdx;
+            size_t* out_read = (size_t*)(uintptr_t)context->r10;
+            size_t rd = 0;
+
+            if (file == NULL || buffer == NULL || out_read == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                serial_printf("fail 2\n");
+                break;
+            }
+
+            if (vfs_read(file, buffer, bytes, &rd) != VFS_OK) {
+                context->rax = (uint64_t)ERR_FAIL;
+                serial_printf("fail 3\n");
+                break;
+            }
+
+            *out_read = rd;
+            context->rax = ERR_SUCCESS;
+            break;
+        }
+
+        case SYS_FS_CLOSE: {
+            vfs_file_t* file = (vfs_file_t*)(uintptr_t)context->rdi;
+            context->rax = (vfs_close(file) == VFS_OK) ? ERR_SUCCESS : (uint64_t)ERR_FAIL;
+            break;
+        }
+
+        case SYS_PIPE: {
+            uint64_t* user_r = (uint64_t*)context->rdi;
+            uint64_t* user_w = (uint64_t*)context->rsi;
+            vfs_file_t *r_file = NULL, *w_file = NULL;
+            
+            if (user_r == NULL || user_w == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+            
+            if (vfs_create_pipe(&r_file, &w_file) == VFS_OK) {
+                *user_r = (uint64_t)(uintptr_t)r_file;
+                *user_w = (uint64_t)(uintptr_t)w_file;
+                context->rax = ERR_SUCCESS;
+            } else {
+                context->rax = (uint64_t)ERR_FAIL;
+            }
+            break;
+        }
+
+        case SYS_FS_WRITE: {
+            vfs_file_t* file = (vfs_file_t*)(uintptr_t)context->rdi;
+            void* buffer = (void*)context->rsi;
+            size_t bytes = (size_t)context->rdx;
+            size_t* out_written = (size_t*)(uintptr_t)context->r10;
+            size_t wr = 0;
+
+            if (file == NULL || buffer == NULL || out_written == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            if (vfs_write(file, buffer, bytes, &wr) == VFS_OK) {
+                *out_written = wr;
+                context->rax = ERR_SUCCESS;
+            } else {
+                context->rax = (uint64_t)ERR_FAIL;
+            }
             break;
         }
 

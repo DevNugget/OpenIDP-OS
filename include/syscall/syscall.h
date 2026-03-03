@@ -17,6 +17,15 @@
 #define SYS_KEYBOARD_READ 9
 #define SYS_MOUSE_POLL 10
 #define SYS_MOUSE_READ 11
+#define SYS_GETPID 12
+#define SYS_SPAWN 13
+#define SYS_WAIT 14
+#define SYS_KILL 15
+#define SYS_FS_OPEN 16
+#define SYS_FS_READ 17
+#define SYS_FS_CLOSE 18
+#define SYS_PIPE 19
+#define SYS_FS_WRITE 20
 
 typedef struct syscall_key_event_t {
     uint8_t code;

@@ -19,14 +19,14 @@
 
 #include <limine.h>
 
-#define PROCESS_STACK_SIZE (64 * 1024)
+#define PROCESS_STACK_SIZE (1024 * 1024)
 #define DEFAULT_TIME_SLICE_TICKS 4
 #define SIMD_STATE_SIZE 512
 #define KERNEL_CONTEXT_SIZE (sizeof(cpu_status_t) - (2 * sizeof(uint64_t)))
 
 #define USER_STACK_TOP 0x00007FFFFFFFE000ULL
 #define USER_SHM_BASE  0x0000600000000000ULL
-#define USER_STACK_PAGES 16
+#define USER_STACK_PAGES 512
 #define USER_STACK_GUARD_PAGES 1
 #define USER_PROCESS_FILE_CHUNK 1024
 
@@ -267,9 +267,25 @@ static int reap_one_zombie(void) {
         return 0;
     }
 
+    if (dead->parent != NULL) {
+        uint64_t p_flags = spinlock_lock_irqsave(&process_lock);
+        thread_t** t_prev = &dead->parent->threads;
+        thread_t* t_cur = dead->parent->threads;
+        while (t_cur) {
+            if (t_cur == dead) {
+                *t_prev = t_cur->sibling;
+                break;
+            }
+            t_prev = &t_cur->sibling;
+            t_cur = t_cur->sibling;
+        }
+        spinlock_unlock_irqrestore(&process_lock, p_flags);
+    }
+
     if (dead->stack_base != NULL) kfree(dead->stack_base);
     if (dead->simd_state_alloc != NULL) kfree(dead->simd_state_alloc);
     kfree(dead);
+    serial_printf("Reaped zombie.\n");
 
     return 1;
 }
@@ -331,9 +347,13 @@ static thread_t* dequeue_next_runnable_thread(void) {
 }
 
 static thread_t* pick_next_thread(size_t cpu_index, thread_t* current_thread) {
-    thread_t* next_thread = dequeue_next_runnable_thread();
-    if (next_thread != NULL) {
-        return next_thread;
+    thread_t* next_thread;
+    
+    while ((next_thread = dequeue_next_runnable_thread()) != NULL) {
+        if (next_thread->status != THREAD_DEAD) {
+            return next_thread;
+        }
+        queue_zombie(next_thread);
     }
 
     if (current_thread != NULL && current_thread->status != THREAD_DEAD) {
@@ -509,7 +529,7 @@ static thread_t* create_thread(process_t* parent, void(*function)(void*), void* 
     return thread;
 }
 
-static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int enqueue) {
+static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int enqueue, int argc, char kernel_argv[16][64]) {
     if (!parent || parent->pml4 == NULL || entry_point == 0) return NULL;
 
     thread_t* thread = kmalloc(sizeof(thread_t));
@@ -517,36 +537,60 @@ static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int
     memset(thread, 0, sizeof(thread_t));
 
     uint64_t user_stack_top = 0;
-    if (!allocate_user_stack(parent, &user_stack_top)) {
-        kfree(thread);
-        return NULL;
-    }
+    if (!allocate_user_stack(parent, &user_stack_top)) { kfree(thread); return NULL; }
 
     uint64_t kernel_stack_top = alloc_stack(thread);
-    if (kernel_stack_top == 0) {
-        kfree(thread); 
-        return NULL;
-    }
+    if (kernel_stack_top == 0) { kfree(thread); return NULL; }
 
     if (!allocate_thread_simd_state(thread)) {
-        kfree(thread->stack_base);
-        kfree(thread);
-        return NULL;
+        kfree(thread->stack_base); kfree(thread); return NULL;
     }
 
     thread->status = THREAD_READY;
     thread->parent = parent;
     thread->is_user_thread = 1;
 
-    initialize_thread_context(thread, kernel_stack_top, 1, entry_point);
+    uint64_t rsp = user_stack_top;
+    uint64_t rflags;
+    asm volatile("pushfq; pop %0; cli" : "=r"(rflags));
+    
+    phys_addr_t current_cr3 = read_cr3();
+    write_cr3((vmm_get_phys(parent->pml4) & ~0xFFFULL) | (current_cr3 & 0xFFFULL));
 
-    thread->context->iret_rsp = user_stack_top;
+    uint64_t user_argv_ptrs[16];
+
+    for (int i = argc - 1; i >= 0; i--) {
+        size_t len = strlen(kernel_argv[i]) + 1;
+        rsp -= len;
+        strcpy((char*)rsp, kernel_argv[i]);
+        user_argv_ptrs[i] = rsp;
+    }
+
+    rsp &= ~0xFULL;
+
+    rsp -= sizeof(uint64_t);
+    *(uint64_t*)rsp = 0; 
+    for (int i = argc - 1; i >= 0; i--) {
+        rsp -= sizeof(uint64_t);
+        *(uint64_t*)rsp = user_argv_ptrs[i];
+    }
+    
+    uint64_t final_argv_ptr = rsp;
+
+    write_cr3(current_cr3);
+    asm volatile("push %0; popfq" :: "r"(rflags));
+
+    uint64_t stack_offset = user_stack_top - rsp;
+    uint64_t user_mode_rsp = USER_STACK_TOP - stack_offset;
+
+    initialize_thread_context(thread, kernel_stack_top, 1, entry_point);
+    
+    thread->context->iret_rsp = user_mode_rsp;
+    thread->context->rdi = argc;
+    thread->context->rsi = user_mode_rsp;
 
     link_thread_to_process(parent, thread);
-
-    if (enqueue) {
-        enqueue_thread(thread);
-    }
+    if (enqueue) enqueue_thread(thread);
 
     return thread;
 }
@@ -585,6 +629,13 @@ process_t* create_process(char* name, void(*function)(void*), void* arg) {
     if (!process) return NULL;
 
     memset(process, 0, sizeof(process_t));
+
+    process->parent_pid = 0;
+    process->exited = 0;
+    process->exit_code = 0;
+    process->parent = NULL;
+    process->first_child = NULL;
+    process->next_sibling = NULL;
 
     strncpy(process->name, name, PROC_NAME_LEN - 1);
     process->name[PROC_NAME_LEN - 1] = '\0';
@@ -676,48 +727,35 @@ static int read_vfs_file_all(const char* path, void** out_data, size_t* out_size
     return 0;
 }
 
-process_t* create_user_process_from_elf(char* name, const void* elf_image, size_t elf_image_size) {
+process_t* create_user_process_from_elf(char* name, const void* elf_image, size_t elf_image_size, int argc, char kernel_argv[16][64]) {
     process_t* process = create_process(name, NULL, NULL);
-    if (process == NULL) {
-        return NULL;
-    }
-
-    //uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    if (process == NULL) return NULL;
 
     uint64_t entry_point = 0;
     if (elf64_load_process_image(process, elf_image, elf_image_size, &entry_point) != 0) {
-        destroy_failed_process(process);
-        //spinlock_unlock_irqrestore(&process_lock, flags);
-        return NULL;
+        destroy_failed_process(process); return NULL;
     }
 
-    if (create_user_thread(process, entry_point, 1) == NULL) {
-        destroy_failed_process(process);
-        //spinlock_unlock_irqrestore(&process_lock, flags);
-        return NULL;
+    if (create_user_thread(process, entry_point, 1, argc, kernel_argv) == NULL) {
+        destroy_failed_process(process); return NULL;
     }
-
-    //spinlock_unlock_irqrestore(&process_lock, flags);
     return process;
 }
 
-process_t* create_user_process_from_path(char* name, const char* path) {
+process_t* create_user_process_from_path(char* name, const char* path, int argc, char kernel_argv[16][64]) {
     void* elf_image = NULL;
     size_t elf_size = 0;
-
-    //uint64_t flags = spinlock_lock_irqsave(&process_lock);
 
     serial_printf("[SCHED] Attempting to load user process: %s\n", path);
 
     if (read_vfs_file_all(path, &elf_image, &elf_size) != 0) {
         serial_printf("[SCHED] FATAL: Failed to read %s from VFS.\n", path);
-        //spinlock_unlock_irqrestore(&process_lock, flags);
         return NULL;
     }
 
     serial_printf("[SCHED] Read %u bytes. Parsing ELF...\n", (uint32_t)elf_size);
 
-    process_t* process = create_user_process_from_elf(name, elf_image, elf_size);
+    process_t* process = create_user_process_from_elf(name, elf_image, elf_size, argc, kernel_argv);
     if (process == NULL) {
         serial_printf("[SCHED] FATAL: ELF parsing failed for %s.\n", path);
     } else {
@@ -725,8 +763,114 @@ process_t* create_user_process_from_path(char* name, const char* path) {
     }
     kfree(elf_image);
 
-    //spinlock_unlock_irqrestore(&process_lock, flags);
     return process;
+}
+
+size_t scheduler_current_pid(void) {
+    thread_t* t = scheduler_current_thread();
+    if (t == NULL || t->parent == NULL) {
+        return 0;
+    }
+    return t->parent->pid;
+}
+
+static process_t* process_find_unsafe(size_t pid) {
+    process_t* p = processes_list;
+    while (p != NULL) {
+        if (p->pid == pid) {
+            return p;
+        }
+        p = p->next;
+    }
+    return NULL;
+}
+
+int scheduler_spawn_process(const char* path, const char** user_argv, size_t parent_pid, size_t* out_pid) {
+    if (path == NULL || out_pid == NULL) return -1;
+
+    char kernel_argv[16][64];
+    int argc = 0;
+
+    if (user_argv != NULL) {
+        for (int i = 0; i < 16; i++) {
+            if (user_argv[i] == NULL) break;
+            strncpy(kernel_argv[i], user_argv[i], 63);
+            kernel_argv[i][63] = '\0';
+            argc++;
+        }
+    } else {
+        strncpy(kernel_argv[0], path, 63);
+        kernel_argv[0][63] = '\0';
+        argc = 1;
+    }
+
+    process_t* process = create_user_process_from_path("spawned", path, argc, kernel_argv);
+    if (process == NULL) return -1;
+
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    process_t* parent = process_find_unsafe(parent_pid);
+    if (parent != NULL) {
+        process->parent = parent;
+        process->parent_pid = parent->pid;
+        process->next_sibling = parent->first_child;
+        parent->first_child = process;
+    }
+    spinlock_unlock_irqrestore(&process_lock, flags);
+
+    *out_pid = process->pid;
+    return 0;
+}
+
+static void kill_threads_of_process(process_t* process) {
+    for (thread_t* t = process->threads; t != NULL; t = t->sibling) {
+        t->status = THREAD_DEAD;
+    }
+}
+
+static void kill_process_recursive_unsafe(process_t* process, int exit_code) {
+    for (process_t* child = process->first_child; child != NULL; child = child->next_sibling) {
+        kill_process_recursive_unsafe(child, 137);
+    }
+
+    process->exited = 1;
+    process->exit_code = exit_code;
+    kill_threads_of_process(process);
+}
+
+int scheduler_kill_process_tree(size_t pid, int exit_code) {
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    process_t* process = process_find_unsafe(pid);
+    if (process == NULL) {
+        spinlock_unlock_irqrestore(&process_lock, flags);
+        return -1;
+    }
+
+    kill_process_recursive_unsafe(process, exit_code);
+    spinlock_unlock_irqrestore(&process_lock, flags);
+    return 0;
+}
+
+int scheduler_wait_process(size_t waiter_pid, size_t target_pid, int* out_exit_code) {
+    (void)waiter_pid;
+    if (out_exit_code == NULL) {
+        return -1;
+    }
+
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    process_t* process = process_find_unsafe(target_pid);
+    if (process == NULL) {
+        spinlock_unlock_irqrestore(&process_lock, flags);
+        return -1;
+    }
+
+    if (!process->exited) {
+        spinlock_unlock_irqrestore(&process_lock, flags);
+        return 1;
+    }
+
+    *out_exit_code = process->exit_code;
+    spinlock_unlock_irqrestore(&process_lock, flags);
+    return 0;
 }
 
 static void idle_thread_func(void* arg);
@@ -755,12 +899,62 @@ static void idle_thread_func(void* arg) {
     }
 }
 
+static int reap_exited_processes(void) {
+    process_t* dead_proc = NULL;
+
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    process_t** prev = &processes_list;
+    process_t* cur = processes_list;
+
+    while (cur) {
+        if (cur->exited && cur->threads == NULL) {
+            *prev = cur->next;
+            dead_proc = cur;
+            
+            if (dead_proc->parent) {
+                process_t** child_prev = &dead_proc->parent->first_child;
+                process_t* child_cur = dead_proc->parent->first_child;
+                while (child_cur) {
+                    if (child_cur == dead_proc) {
+                        *child_prev = child_cur->next_sibling;
+                        break;
+                    }
+                    child_prev = &child_cur->next_sibling;
+                    child_cur = child_cur->next_sibling;
+                }
+            }
+
+            process_t* orphan = dead_proc->first_child;
+            while (orphan) {
+                orphan->parent = NULL;
+                process_t* next = orphan->next_sibling;
+                orphan->next_sibling = NULL;
+                orphan = next;
+            }
+            
+            break;
+        }
+        prev = &cur->next;
+        cur = cur->next;
+    }
+    spinlock_unlock_irqrestore(&process_lock, flags);
+
+    if (dead_proc) {
+        if (dead_proc->pml4) {
+            pmm_free(vmm_get_phys(dead_proc->pml4), 1);
+        }
+        kfree(dead_proc);
+        return 1;
+    }
+    return 0;
+}
+
 static void reaper_thread_func(void* arg) {
     while (1) {
+        int reaped_thread = reap_one_zombie(); 
+        int reaped_process = reap_exited_processes();
 
-        int reaped = reap_one_zombie(); 
-
-        if (!reaped) {
+        if (!reaped_thread && !reaped_process) {
             asm volatile ("int $0x20");
         }
     }

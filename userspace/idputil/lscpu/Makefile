@@ -2,10 +2,10 @@
 
 APP := lscpu
 CC ?= cc
-CFLAGS := -g -O2 -Wall -Wextra -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -I../../
+CFLAGS := -g -O2 -Wall -Wextra -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -I../..
 LDFLAGS := -nostdlib -static -no-pie -T linker.ld
 
-SRC := lscpu.c
+SRC := lscpu.c ../../libidp/stdio.c
 OBJ := $(SRC:.c=.o)
 
 .PHONY: all clean

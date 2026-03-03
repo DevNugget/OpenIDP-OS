@@ -1,19 +1,7 @@
 #include "gfx.h"
 
-static void gfx_memset32(uint32_t* dst, uint32_t value, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        dst[i] = value;
-    }
-}
-
 static void gfx_memcpy8(uint8_t* dst, const uint8_t* src, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
-        dst[i] = src[i];
-    }
-}
-
-static void gfx_memcpy32(uint32_t* dst, const uint32_t* src, uint64_t count_u32) {
-    for (uint64_t i = 0; i < count_u32; ++i) {
         dst[i] = src[i];
     }
 }

@@ -19,7 +19,7 @@
 
 #include <limine.h>
 
-#define PROCESS_STACK_SIZE (1024 * 1024)
+#define PROCESS_STACK_SIZE (128 * 1024)
 #define DEFAULT_TIME_SLICE_TICKS 4
 #define SIMD_STATE_SIZE 512
 #define KERNEL_CONTEXT_SIZE (sizeof(cpu_status_t) - (2 * sizeof(uint64_t)))

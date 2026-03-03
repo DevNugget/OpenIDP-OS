@@ -196,7 +196,16 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
 
     uint64_t shm_size = sizeof(window_ipc_t) + (WINDOW_MAX_WIDTH * WINDOW_MAX_HEIGHT * 4);
     c->shm_handle = (uint64_t)sys_shm_create(shm_size);
+    if ((int64_t)c->shm_handle < 0) {
+        return;
+    }
     c->ipc = (window_ipc_t*)sys_shm_map(c->shm_handle);
+    if ((uint64_t)c->ipc == (uint64_t)-1 || c->ipc == NULL) {
+        sys_shm_destroy(c->shm_handle);
+        c->shm_handle = 0;
+        c->ipc = NULL;
+        return;
+    }
     
     c->ipc->width = WINDOW_MAX_WIDTH;
     c->ipc->height = WINDOW_MAX_HEIGHT;
@@ -221,6 +230,13 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
 
     const char* args[] = {"/nvme/bin/idpterm.elf", handle_str, NULL};
     c->pid = sys_spawn(args[0], args);
+    if (c->pid < 0) {
+        sys_shm_unmap(c->ipc);
+        sys_shm_destroy(c->shm_handle);
+        c->ipc = NULL;
+        c->shm_handle = 0;
+        return;
+    }
 
     wm->client_count++;
     wm->focused_index = idx;
@@ -255,6 +271,13 @@ static void wm_close_focused(wm_state_t* wm) {
 
     if (wm->focused_index >= wm->client_count) {
         wm->focused_index = (uint8_t)(wm->client_count - 1);
+    }
+}
+
+static void wm_shutdown(wm_state_t* wm) {
+    while (wm->client_count > 0) {
+        wm->focused_index = 0;
+        wm_close_focused(wm);
     }
 }
 
@@ -352,6 +375,7 @@ void main() {
         sys_yield();
     }
 
+    wm_shutdown(&wm);
     gfx_shutdown(&gfx);
     sys_exit(0);
 }

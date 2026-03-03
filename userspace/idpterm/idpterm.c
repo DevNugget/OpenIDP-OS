@@ -90,10 +90,15 @@ static void term_clear(term_t* t) {
 
 static void term_scroll(term_t* t) {
     for (size_t r = 1; r < t->rows; r++) {
-        for(size_t c = 0; c < t->cols; c++) {
-            t->grid[r-1][c] = t->grid[r][c];
+        gfx_memcpy32((uint32_t*)&t->grid[r - 1][0], (const uint32_t*)&t->grid[r][0], t->cols);
+    }
+
+    for (size_t r = 0; r + 1 < t->rows; ++r) {
+        for (size_t c = 0; c < t->cols; ++c) {
+            t->grid[r][c].dirty = 1;
         }
     }
+
     for (size_t c = 0; c < t->cols; c++) {
         t->grid[t->rows-1][c] = (cell_t){' ', 15, 0, 1};
     }
@@ -129,17 +134,20 @@ static void draw_cell(term_t* t, size_t r, size_t c) {
     int x = (int)(c * t->glyph_w);
     int y = (int)(r * t->glyph_h);
     
-    gfx_fill_rect(t->gfx, x, y, t->glyph_w, t->glyph_h, color(cell.bg));
+    uint32_t bg_color = color(cell.bg);
+    uint32_t fg_color = color(cell.fg);
+
+    gfx_fill_rect(t->gfx, x, y, t->glyph_w, t->glyph_h, bg_color);
     
     const uint8_t* g = t->glyphs + ((uint8_t)cell.ch * t->bytes_per_glyph);
     
     int bytes_per_row = (t->glyph_w + 7) / 8;
 
-    for (int gy = 0; gy < t->glyph_h; gy++) {
-        for (int gx = 0; gx < t->glyph_w; gx++) {
-            uint8_t byte = g[gy * bytes_per_row + (gx / 8)];
+    for (uint32_t gy = 0; gy < t->glyph_h; gy++) {
+        for (uint32_t gx = 0; gx < t->glyph_w; gx++) {
+            uint8_t byte = g[gy * (uint32_t)bytes_per_row + (gx / 8)];
             if (byte & (0x80 >> (gx % 8))) {
-                gfx_put_pixel(t->gfx, x + gx, y + gy, color(cell.fg));
+                t->gfx->back_buffer[(y + (int)gy) * t->gfx->stride_pixels + (x + (int)gx)] = fg_color;
             }
         }
     }
@@ -215,7 +223,16 @@ void main(int argc, char** argv) {
     for (size_t i = 0; i < sizeof(gfx); ++i) ((uint8_t*)&gfx)[i] = 0;
     
     uint64_t bb_handle = sys_shm_create(WINDOW_MAX_WIDTH * WINDOW_MAX_HEIGHT * 4);
+    if ((int64_t)bb_handle < 0) {
+        sys_shm_unmap(ipc);
+        sys_exit(1);
+    }
     gfx.back_buffer = (uint32_t*)sys_shm_map(bb_handle);
+    if ((uint64_t)gfx.back_buffer == (uint64_t)-1 || gfx.back_buffer == NULL) {
+        sys_shm_destroy(bb_handle);
+        sys_shm_unmap(ipc);
+        sys_exit(1);
+    }
 
     gfx.front_buffer = ipc->pixels;
     gfx.width = WINDOW_MAX_WIDTH;
@@ -246,15 +263,29 @@ void main(int argc, char** argv) {
 
     uint64_t shell_in_r, shell_in_w;
     uint64_t shell_out_r, shell_out_w;
-    sys_pipe(&shell_in_r, &shell_in_w);
-    sys_pipe(&shell_out_r, &shell_out_w);
+    if (sys_pipe(&shell_in_r, &shell_in_w) != ERR_SUCCESS || sys_pipe(&shell_out_r, &shell_out_w) != ERR_SUCCESS) {
+        sys_shm_unmap(gfx.back_buffer);
+        sys_shm_destroy(bb_handle);
+        sys_shm_unmap(ipc);
+        sys_exit(1);
+    }
 
     char arg_in[20], arg_out[20];
     u64_to_hex(shell_in_r, arg_in);
     u64_to_hex(shell_out_w, arg_out);
 
     const char* shell_args[] = {"/nvme/bin/idpshell.elf", arg_in, arg_out, NULL};
-    sys_spawn(shell_args[0], shell_args);
+    int shell_pid = sys_spawn(shell_args[0], shell_args);
+    if (shell_pid < 0) {
+        sys_close(shell_in_r);
+        sys_close(shell_in_w);
+        sys_close(shell_out_r);
+        sys_close(shell_out_w);
+        sys_shm_unmap(gfx.back_buffer);
+        sys_shm_destroy(bb_handle);
+        sys_shm_unmap(ipc);
+        sys_exit(1);
+    }
 
     while (1) {
         uint32_t new_cols = ipc->width / term.glyph_w;

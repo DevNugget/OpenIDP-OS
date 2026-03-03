@@ -32,17 +32,29 @@ typedef struct {
     uint32_t bytes_per_glyph;
     uint32_t glyph_w;
     uint32_t glyph_h;
+    uint8_t fg;
+    uint8_t bg;
 } term_t;
 
 static uint8_t g_font_storage[FONT_MAX_BYTES];
 
-static uint32_t palette[] = {
-    0x1e1e2e, // base
-    0xb4befe, // lavender
-    0x6c7086, // overlay 0
-    0x585b70, // surface 2
-    0x2A9D8F, 0xE76F51, 0x457B9D, 0xF4A261,
-    0x8D99AE, 0xB56576, 0x5E60CE, 0x6A994E
+static uint32_t palette[16] = {
+    0x181825, // 0: Black
+    0xf38ba8, // 1: Red
+    0xa6e3a1, // 2: Green
+    0xf9e2af, // 3: Yellow
+    0x89b4fa, // 4: Blue
+    0xcba6f7, // 5: Magenta
+    0xb4befe, // 6: Cyan
+    0xa6adc8, // 7: White
+    0x45475a, // 8: Bright Black (Gray)
+    0xf38ba8, // 9: Bright Red
+    0xa6e3a1, // 10: Bright Green
+    0xf9e2af, // 11: Bright Yellow
+    0x89b4fa, // 12: Bright Blue
+    0xcba6f7, // 13: Bright Magenta
+    0xb4befe, // 14: Bright Cyan
+    0xcdd6f4  // 15: Bright White
 };
 
 static int psf2_parse(const uint8_t* blob, size_t len, const uint8_t** glyphs, uint32_t* bpg, uint32_t* w, uint32_t* h) {
@@ -90,7 +102,7 @@ static int load_font_from_fs(const char* path, const uint8_t** glyphs, uint32_t*
 static void term_clear(term_t* t) {
     for (size_t r = 0; r < t->rows; r++) {
         for (size_t c = 0; c < t->cols; c++) {
-            t->grid[r][c] = (cell_t){' ', 15, 0, 1};
+            t->grid[r][c] = (cell_t){' ', t->fg, t->bg, 1};
         }
     }
     t->row = 0;
@@ -109,7 +121,7 @@ static void term_scroll(term_t* t) {
     }
 
     for (size_t c = 0; c < t->cols; c++) {
-        t->grid[t->rows-1][c] = (cell_t){' ', 15, 0, 1};
+        t->grid[t->rows-1][c] = (cell_t){' ', t->fg, t->bg, 1};
     }
     if (t->row) t->row--;
 }
@@ -127,10 +139,10 @@ static void term_putc(term_t* t, char ch) {
     }
     else if (ch == '\b') { 
         if (t->col) t->col--; 
-        t->grid[t->row][t->col] = (cell_t){' ', 15, 0, 1};
+        t->grid[t->row][t->col] = (cell_t){' ', t->fg, t->bg, 1};
     }
     else {
-        t->grid[t->row][t->col] = (cell_t){ch, 15, 0, 1};
+        t->grid[t->row][t->col] = (cell_t){ch, t->fg, t->bg, 1};
         if (++t->col >= t->cols) { 
             t->col = 0; 
             t->row++; 
@@ -141,7 +153,12 @@ static void term_putc(term_t* t, char ch) {
     t->grid[t->row][t->col].dirty = 1;
 }
 
-static uint32_t color(uint8_t idx){ return idx?gfx_rgb(220,220,220):gfx_rgb(20,24,32); }
+static uint32_t color(uint8_t idx) {
+    if (idx > 15) idx = 15; // bounds check fallback
+    uint32_t hex = palette[idx];
+
+    return gfx_rgb((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF);
+}
 
 static void draw_cell(term_t* t, size_t r, size_t c) {
     cell_t cell = t->grid[r][c];
@@ -285,6 +302,8 @@ void main(int argc, char** argv) {
     if (term.cols == 0) term.cols = 1;
     if (term.rows == 0) term.rows = 1;
 
+    term.fg = 15;
+    term.bg = 0;
     term_clear(&term);
     const char* banner = "idpterm ready\n";
     for (size_t i=0; banner[i]; ++i) term_putc(&term, banner[i]);
@@ -365,6 +384,11 @@ void main(int argc, char** argv) {
         static int ansi_state = 0;
         static char title_buf[WINDOW_TITLE_MAX] = " idpterm - ";
         static int title_len = 11;
+        
+        static int ansi_params[16];
+        static int ansi_param_cnt = 0;
+        static int ansi_val = 0;
+        static int ansi_has_val = 0;
 
         if (rd > 0) {
             for (uint64_t i = 0; i < rd; i++) {
@@ -376,6 +400,13 @@ void main(int argc, char** argv) {
                 } 
                 else if (ansi_state == 1) {
                     if (c == ']') ansi_state = 2;
+                    else if (c == '[') {
+                        ansi_state = 5;
+                        ansi_param_cnt = 0;
+                        ansi_val = 0;
+                        ansi_has_val = 0;
+                        for(int p=0; p<16; ++p) ansi_params[p] = 0;
+                    }
                     else { ansi_state = 0; term_putc(&term, '\x1b'); term_putc(&term, c); }
                 } 
                 else if (ansi_state == 2) {
@@ -383,25 +414,88 @@ void main(int argc, char** argv) {
                     else ansi_state = 0;
                 } 
                 else if (ansi_state == 3) {
-                    if (c == ';') { ansi_state = 4; title_len = 0; }
+                    if (c == ';') { ansi_state = 4; title_len = 11; }
                     else ansi_state = 0;
                 } 
                 else if (ansi_state == 4) {
                     if (c == '\x07') {
                         title_buf[title_len] = '\0';
-                        
-                        int t_idx = 11;
-                        while (title_buf[t_idx] && t_idx < WINDOW_TITLE_MAX - 1) {
-                            ipc->title[t_idx] = title_buf[t_idx];
-                            t_idx++;
+                        for (int k = 0; k <= title_len; k++) {
+                            ipc->title[k] = title_buf[k];
                         }
-                        ipc->title[t_idx] = '\0';
-                        
                         ansi_state = 0;
                         needs_render = 1;
                     } else {
                         if (title_len < WINDOW_TITLE_MAX - 1) {
                             title_buf[title_len++] = c;
+                        }
+                    }
+                }
+                else if (ansi_state == 5) {
+                    if (c >= '0' && c <= '9') {
+                        ansi_val = ansi_val * 10 + (c - '0');
+                        ansi_has_val = 1;
+                    } else if (c == ';') {
+                        if (ansi_param_cnt < 16) {
+                            ansi_params[ansi_param_cnt++] = ansi_val;
+                        }
+                        ansi_val = 0;
+                        ansi_has_val = 0;
+                    } else if (c == 'm') {
+                        if (ansi_has_val && ansi_param_cnt < 16) {
+                            ansi_params[ansi_param_cnt++] = ansi_val;
+                        } else if (!ansi_has_val && ansi_param_cnt == 0) {
+                            ansi_params[0] = 0;
+                            ansi_param_cnt = 1;
+                        }
+                        
+                        for (int p_idx = 0; p_idx < ansi_param_cnt; p_idx++) {
+                            int p = ansi_params[p_idx];
+                            if (p == 0) {
+                                term.fg = 15; term.bg = 0;
+                            } else if (p >= 30 && p <= 37) {
+                                term.fg = p - 30;
+                            } else if (p == 39) {
+                                term.fg = 15;
+                            } else if (p >= 40 && p <= 47) {
+                                term.bg = p - 40;
+                            } else if (p == 49) {
+                                term.bg = 0;
+                            } else if (p >= 90 && p <= 97) {
+                                term.fg = p - 90 + 8;
+                            } else if (p >= 100 && p <= 107) {
+                                term.bg = p - 100 + 8;
+                            }
+                        }
+                        ansi_state = 0;
+                    } else if (c == 'J') {
+                        int mode = ansi_has_val ? ansi_val : 0;
+                        if (mode == 2) {
+                            term_clear(&term);
+                        }
+                        ansi_state = 0;
+                    } else if (c == 'H') {
+                        int r = 1, c_pos = 1;
+
+                        if (ansi_param_cnt >= 2) {
+                            r = ansi_params[0];
+                            c_pos = ansi_params[1];
+                        } else if (ansi_has_val) {
+                            r = ansi_val;
+                        } else if (ansi_param_cnt == 1 && ansi_params[0] > 0) {
+                            r = ansi_params[0];
+                        }
+
+                        term.row = (r > 0) ? r - 1 : 0;
+                        term.col = (c_pos > 0) ? c_pos - 1 : 0;
+
+                        if (term.row >= term.rows) term.row = term.rows - 1;
+                        if (term.col >= term.cols) term.col = term.cols - 1;
+
+                        ansi_state = 0;
+                    } else {
+                        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                            ansi_state = 0; 
                         }
                     }
                 }

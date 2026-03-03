@@ -45,10 +45,10 @@ typedef struct {
 gfx_font_t g_title_font;
 
 static uint32_t palette[] = {
-    0x1e1e2e, // base
+    0x181825, // base
     0xb4befe, // lavender
     0x6c7086, // overlay 0
-    0x585b70, // surface 2
+    0x45475a, // surface 2
     0x2A9D8F, 0xE76F51, 0x457B9D, 0xF4A261,
     0x8D99AE, 0xB56576, 0x5E60CE, 0x6A994E
 };
@@ -81,7 +81,7 @@ static void draw_client(wm_state_t* wm, uint8_t idx) {
     }
 
     int text_x = c->frame.x + IDPWM_BORDER_WIDTH + 4;
-    int text_y = c->frame.y + (padding / 1);
+    int text_y = c->frame.y + (padding * 1.5);
     if (c->ipc && c->ipc->title[0] != '\0') {
         gfx_draw_string(wm->gfx, &g_title_font, c->ipc->title, text_x, text_y, palette[0]);
     } else {

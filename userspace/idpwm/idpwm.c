@@ -39,6 +39,7 @@ typedef struct {
     wm_layout_t layout;
     uint8_t running;
     uint8_t master_ratio_percent;
+    uint8_t dirty;
 } wm_state_t;
 
 static uint32_t palette[] = {
@@ -240,6 +241,7 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
 
     wm->client_count++;
     wm->focused_index = idx;
+    wm->dirty = 1;
 }
 
 static void wm_close_focused(wm_state_t* wm) {
@@ -272,6 +274,8 @@ static void wm_close_focused(wm_state_t* wm) {
     if (wm->focused_index >= wm->client_count) {
         wm->focused_index = (uint8_t)(wm->client_count - 1);
     }
+
+    wm->dirty = 1;
 }
 
 static void wm_shutdown(wm_state_t* wm) {
@@ -307,24 +311,33 @@ static void wm_handle_key(wm_state_t* wm, const key_event_t* ev) {
         }
     
         if (shift && ev->code == KEY_ENTER) {
+            wm->dirty = 1;
             wm_swap_focus_with_master(wm);
         } else if (ev->code == KEY_ENTER) {
+            wm->dirty = 1;
             wm_spawn_terminal_client(wm);
         } else if (ev->code == KEY_Q) {
+            wm->dirty = 1;
             wm_close_focused(wm);
         } else if (ev->code == KEY_SPACE) {
+            wm->dirty = 1;
             wm->layout = (wm->layout == LAYOUT_MASTER_STACK) ? LAYOUT_MONOCLE : LAYOUT_MASTER_STACK;
         } else if (ev->code == KEY_TAB || ev->code == KEY_J || ev->code == KEY_L) {
+            wm->dirty = 1;
             if (shift) wm_focus_prev(wm);
             else wm_focus_next(wm);
         } else if (ev->code == KEY_K || ev->code == KEY_H) {
+            wm->dirty = 1;
             if (shift) wm_focus_next(wm);
             else wm_focus_prev(wm);
         } else if (ev->code == KEY_MINUS) {
+            wm->dirty = 1;
             if (wm->master_ratio_percent > 35) wm->master_ratio_percent -= 5;
         } else if (ev->code == KEY_EQUAL) {
+            wm->dirty = 1;
             if (wm->master_ratio_percent < 75) wm->master_ratio_percent += 5;
         } else if (ev->code >= KEY_1 && ev->code <= KEY_8) {
+            wm->dirty = 1;
             uint8_t target = (uint8_t)(ev->code - KEY_1);
             if (target < wm->client_count) {
                 wm->focused_index = target;
@@ -361,17 +374,36 @@ void main() {
 
     wm_spawn_terminal_client(&wm);
 
+    wm.dirty = 1;
+
     while (wm.running) {
         while (sys_keyboard_poll() > 0) {
             key_event_t ev;
             if (sys_keyboard_read(&ev) == ERR_SUCCESS) {
-                
                 wm_handle_key(&wm, &ev);
             }
         }
 
-        wm_arrange(&wm);
-        wm_render(&wm);
+        int needs_render = wm.dirty;
+        for (uint8_t i = 0; i < wm.client_count; ++i) {
+            if (wm.clients[i].ipc && wm.clients[i].ipc->dirty) {
+                needs_render = 1;
+                break;
+            }
+        }
+
+        if (needs_render) {
+            wm_arrange(&wm);
+            wm_render(&wm);
+            
+            wm.dirty = 0;
+            for (uint8_t i = 0; i < wm.client_count; ++i) {
+                if (wm.clients[i].ipc) {
+                    wm.clients[i].ipc->dirty = 0;
+                }
+            }
+        }
+        
         sys_yield();
     }
 

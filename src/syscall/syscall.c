@@ -11,6 +11,21 @@
 #define ERR_SUCCESS 0
 #define ERR_FAIL -1
 
+static int alloc_fd(process_t* proc, vfs_file_t* file) {
+    for (int i = 0; i < PROCESS_MAX_FDS; i++) {
+        if (proc->fd_table[i] == NULL) {
+            proc->fd_table[i] = file;
+            return i;
+        }
+    }
+    return -1; // Process FD table is full
+}
+
+static vfs_file_t* get_fd(process_t* proc, int fd) {
+    if (fd < 0 || fd >= PROCESS_MAX_FDS) return NULL;
+    return proc->fd_table[fd];
+}
+
 static int copy_user_string(char* dst, size_t dst_len, const char* src) {
     if (dst == NULL || src == NULL || dst_len == 0) {
         return ERR_FAIL;
@@ -174,36 +189,43 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
 
         case SYS_FS_OPEN: {
             const char* path = (const char*)context->rdi;
-            serial_printf("%s\n", path);
             uint32_t flags = (uint32_t)context->rsi;
             vfs_file_t* file = NULL;
+            
             if (path == NULL || vfs_open(path, flags, &file) != VFS_OK || file == NULL) {
-                serial_printf("fail\n");
                 context->rax = (uint64_t)ERR_FAIL;
                 break;
             }
 
-            context->rax = (uint64_t)(uintptr_t)file;
-            serial_printf("%x\n", context->rax);
+            process_t* current_process = scheduler_current_thread()->parent;
+            int fd = alloc_fd(current_process, file);
+            if (fd < 0) {
+                vfs_close(file);
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            context->rax = (uint64_t)fd;
             break;
         }
 
         case SYS_FS_READ: {
-            vfs_file_t* file = (vfs_file_t*)(uintptr_t)context->rdi;
+            int fd = (int)context->rdi;
             void* buffer = (void*)context->rsi;
             size_t bytes = (size_t)context->rdx;
             size_t* out_read = (size_t*)(uintptr_t)context->r10;
             size_t rd = 0;
 
+            process_t* current_process = scheduler_current_thread()->parent;
+            vfs_file_t* file = get_fd(current_process, fd);
+
             if (file == NULL || buffer == NULL || out_read == NULL) {
                 context->rax = (uint64_t)ERR_FAIL;
-                serial_printf("fail 2\n");
                 break;
             }
 
             if (vfs_read(file, buffer, bytes, &rd) != VFS_OK) {
                 context->rax = (uint64_t)ERR_FAIL;
-                serial_printf("fail 3\n");
                 break;
             }
 
@@ -213,8 +235,17 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
         }
 
         case SYS_FS_CLOSE: {
-            vfs_file_t* file = (vfs_file_t*)(uintptr_t)context->rdi;
+            int fd = (int)context->rdi;
+            process_t* current_process = scheduler_current_thread()->parent;
+            vfs_file_t* file = get_fd(current_process, fd);
+            
+            if (file == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
             context->rax = (vfs_close(file) == VFS_OK) ? ERR_SUCCESS : (uint64_t)ERR_FAIL;
+            current_process->fd_table[fd] = NULL;
             break;
         }
 
@@ -229,9 +260,21 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             }
             
             if (vfs_create_pipe(&r_file, &w_file) == VFS_OK) {
-                *user_r = (uint64_t)(uintptr_t)r_file;
-                *user_w = (uint64_t)(uintptr_t)w_file;
-                context->rax = ERR_SUCCESS;
+                process_t* current_process = scheduler_current_thread()->parent;
+                int fd_r = alloc_fd(current_process, r_file);
+                int fd_w = alloc_fd(current_process, w_file);
+                
+                if (fd_r < 0 || fd_w < 0) {
+                    if (fd_r >= 0) current_process->fd_table[fd_r] = NULL;
+                    if (fd_w >= 0) current_process->fd_table[fd_w] = NULL;
+                    vfs_close(r_file);
+                    vfs_close(w_file);
+                    context->rax = (uint64_t)ERR_FAIL;
+                } else {
+                    *user_r = (uint64_t)fd_r;
+                    *user_w = (uint64_t)fd_w;
+                    context->rax = ERR_SUCCESS;
+                }
             } else {
                 context->rax = (uint64_t)ERR_FAIL;
             }
@@ -239,11 +282,14 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
         }
 
         case SYS_FS_WRITE: {
-            vfs_file_t* file = (vfs_file_t*)(uintptr_t)context->rdi;
+            int fd = (int)context->rdi;
             void* buffer = (void*)context->rsi;
             size_t bytes = (size_t)context->rdx;
             size_t* out_written = (size_t*)(uintptr_t)context->r10;
             size_t wr = 0;
+
+            process_t* current_process = scheduler_current_thread()->parent;
+            vfs_file_t* file = get_fd(current_process, fd);
 
             if (file == NULL || buffer == NULL || out_written == NULL) {
                 context->rax = (uint64_t)ERR_FAIL;

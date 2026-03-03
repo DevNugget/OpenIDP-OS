@@ -8,6 +8,7 @@
 #include <utility/hhdm.h>
 
 #define PROC_NAME_LEN 64
+#define PROCESS_MAX_FDS 32
 
 typedef enum {
     THREAD_READY,
@@ -17,6 +18,7 @@ typedef enum {
 
 struct thread_t;
 struct shm_mapping_t;
+struct vfs_file;
 
 typedef struct process_t {
     size_t pid;
@@ -32,6 +34,7 @@ typedef struct process_t {
     struct process_t* first_child;
     struct process_t* next_sibling;
     struct process_t* next;
+    struct vfs_file* fd_table[PROCESS_MAX_FDS];
 } process_t;
 
 typedef struct thread_t {

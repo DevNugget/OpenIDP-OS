@@ -814,6 +814,13 @@ int scheduler_spawn_process(const char* path, const char** user_argv, size_t par
         process->parent_pid = parent->pid;
         process->next_sibling = parent->first_child;
         parent->first_child = process;
+
+        for (int i = 0; i < PROCESS_MAX_FDS; i++) {
+            if (parent->fd_table[i] != NULL) {
+                process->fd_table[i] = parent->fd_table[i];
+                vfs_file_inc_ref(process->fd_table[i]);
+            }
+        }
     }
     spinlock_unlock_irqrestore(&process_lock, flags);
 
@@ -835,6 +842,13 @@ static void kill_process_recursive_unsafe(process_t* process, int exit_code) {
     process->exited = 1;
     process->exit_code = exit_code;
     kill_threads_of_process(process);
+
+    for (int i = 0; i < PROCESS_MAX_FDS; i++) {
+        if (process->fd_table[i] != NULL) {
+            vfs_close(process->fd_table[i]);
+            process->fd_table[i] = NULL;
+        }
+    }
 }
 
 int scheduler_kill_process_tree(size_t pid, int exit_code) {

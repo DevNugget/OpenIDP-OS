@@ -288,6 +288,8 @@ void main(int argc, char** argv) {
     }
 
     while (1) {
+        int needs_render = 0;
+
         uint32_t new_cols = ipc->width / term.glyph_w;
         uint32_t new_rows = ipc->height / term.glyph_h;
         
@@ -296,25 +298,21 @@ void main(int argc, char** argv) {
         if (new_cols == 0) new_cols = 1;
         if (new_rows == 0) new_rows = 1;
 
-        // If the window size changed...
         if (term.cols != new_cols || term.rows != new_rows) {
             term.cols = new_cols;
             term.rows = new_rows;
             
-            // Constrain cursor if the window shrank
             if (term.col >= term.cols) term.col = term.cols - 1;
             if (term.row >= term.rows) term.row = term.rows - 1;
             
-            // Clear the entire backend buffer to erase old artifacts
             gfx_fill_rect(term.gfx, 0, 0, ipc->width, ipc->height, color(0));
             
-            // ---> THE DIRTY LOOP GOES HERE <---
-            // Mark all cells as dirty so they redraw over the cleared background
             for (size_t r = 0; r < term.rows; r++) {
                 for (size_t c = 0; c < term.cols; c++) {
                     term.grid[r][c].dirty = 1;
                 }
             }
+            needs_render = 1;
         }
 
         if (ipc->key_tail != ipc->key_head) {
@@ -323,7 +321,6 @@ void main(int argc, char** argv) {
 
             if (ev.is_pressed) {
                 uint8_t shift = (ev.status_mask & SHIFT_MASK) != 0;
-                
                 char ch = get_ascii_char(ev.code, shift);
                 
                 if (ch != 0) {
@@ -336,12 +333,20 @@ void main(int argc, char** argv) {
         char buf[64];
         uint64_t rd = 0;
         sys_read(shell_out_r, buf, sizeof(buf), &rd);
-        for (uint64_t i = 0; i < rd; i++) {
-            term_putc(&term, buf[i]);
+        
+        if (rd > 0) {
+            for (uint64_t i = 0; i < rd; i++) {
+                term_putc(&term, buf[i]);
+            }
+            needs_render = 1;
         }
         
-        term_render(&term); 
-        gfx_present(&gfx);
+        if (needs_render) {
+            term_render(&term); 
+            gfx_present(&gfx);
+            ipc->dirty = 1;
+        }
+        
         sys_yield();
     }
 }

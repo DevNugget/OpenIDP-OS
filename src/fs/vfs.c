@@ -24,6 +24,7 @@ struct vfs_file {
     const vfs_mount_t* mount;
     void* handle;
     bool is_pipe_write_end;
+    int ref_count;
 };
 
 static vfs_mount_t g_mounts[VFS_MAX_MOUNTS];
@@ -108,6 +109,7 @@ vfs_status_t vfs_open(const char* path, uint32_t flags, vfs_file_t** out_file) {
         g_files[i].mount = mount;
         g_files[i].handle = handle;
         g_files[i].type = VFS_TYPE_FILE;
+        g_files[i].ref_count = 1;
         *out_file = &g_files[i];
         return VFS_OK;
     }
@@ -131,12 +133,14 @@ vfs_status_t vfs_create_pipe(vfs_file_t** out_read, vfs_file_t** out_write) {
     p->ref_count = 2;
 
     g_files[r_idx].in_use = true;
+    g_files[r_idx].ref_count = 1;
     g_files[r_idx].type = VFS_TYPE_PIPE;
     g_files[r_idx].handle = p;
     g_files[r_idx].is_pipe_write_end = false;
     *out_read = &g_files[r_idx];
 
     g_files[w_idx].in_use = true;
+    g_files[r_idx].ref_count = 1;
     g_files[w_idx].type = VFS_TYPE_PIPE;
     g_files[w_idx].handle = p;
     g_files[w_idx].is_pipe_write_end = true;
@@ -186,6 +190,11 @@ vfs_status_t vfs_write(vfs_file_t* file, const void* buffer, size_t bytes, size_
 vfs_status_t vfs_close(vfs_file_t* file) {
     if (!file || !file->in_use) return VFS_ERR_INVALID;
     
+    file->ref_count--;
+    if (file->ref_count > 0) {
+        return VFS_OK;
+    }
+
     if (file->type == VFS_TYPE_PIPE) {
         pipe_t* p = (pipe_t*)file->handle;
         p->ref_count--;
@@ -198,4 +207,10 @@ vfs_status_t vfs_close(vfs_file_t* file) {
     file->mount = NULL;
     file->handle = NULL;
     return VFS_OK;
+}
+
+void vfs_file_inc_ref(vfs_file_t* file) {
+    if (file && file->in_use) {
+        file->ref_count++;
+    }
 }

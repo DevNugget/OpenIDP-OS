@@ -35,5 +35,6 @@ vfs_status_t vfs_create_pipe(vfs_file_t** out_read, vfs_file_t** out_write);
 vfs_status_t vfs_read(vfs_file_t* file, void* buffer, size_t bytes, size_t* out_read);
 vfs_status_t vfs_write(vfs_file_t* file, const void* buffer, size_t bytes, size_t* out_written);
 vfs_status_t vfs_close(vfs_file_t* file);
+void vfs_file_inc_ref(vfs_file_t* file);
 
 #endif //VFS_H

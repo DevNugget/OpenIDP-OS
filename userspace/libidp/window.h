@@ -17,6 +17,8 @@ typedef struct {
     uint8_t key_head;
     uint8_t key_tail;
 
+    volatile uint8_t dirty;
+
     uint32_t pixels[]; 
 } window_ipc_t;
 

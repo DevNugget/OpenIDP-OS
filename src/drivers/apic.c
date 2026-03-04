@@ -4,6 +4,7 @@
 #include <utility/port.h>
 #include <utility/hhdm.h>
 #include <memory/vmm.h>
+#include <multitasking/smp.h>
 
 extern virt_addr_t* kernel_pml4;
 volatile uint32_t* io_apic_base;
@@ -123,6 +124,8 @@ void io_apic_init(phys_addr_t phys_addr) {
                   (id >> 24) & 0xF, ver & 0xFF, count + 1);
 }
 
+static uint64_t ms_per_interrupt = 0;
+
 void apic_timer_start(uint16_t hz) {
     if (lapic_regs == NULL || lapic_ticks_per_ms == 0 || hz == 0) {
         return;
@@ -145,7 +148,6 @@ void apic_timer_init(uint16_t hz) {
     lapic_ticks_per_ms = ticks_passed / 10;
 
     serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
-    //apic_timer_start(hz);
 }
 
 void inc_uptime() {
@@ -153,9 +155,9 @@ void inc_uptime() {
         return;
     }
 
-    //if (!smp_is_bsp()) {
-    //    return;
-    //}
+    if (!smp_is_bsp()) {
+        return;
+    }
 
     uint32_t timer_init_val = lapic_regs[TIMER_INIT/4];
     uint64_t ms_per_tick = timer_init_val / lapic_ticks_per_ms;

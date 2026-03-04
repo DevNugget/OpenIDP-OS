@@ -122,7 +122,7 @@ static void print_snapshot() {
         shown = PROCVIEW_MAX;
     }
 
-    printf("\x1b[1;36mOpenIDP Process Viewer\x1b[0m\n");
+    printf("\x1b[1;36mProcess Viewer (Snaphot)\x1b[0m\n");
     printf("CPUs: ");
     print_u64(cpu_count);
     printf(" | active processes shown: ");
@@ -181,11 +181,14 @@ static void print_snapshot() {
 }
 
 static void print_table_loop() {
+    printf("\x1b[?25l");
+
     while (1) {
         process_user_info_t entries[PROCVIEW_MAX];
         uint64_t total = 0;
 
         if (sys_proc_list(entries, PROCVIEW_MAX, &total) != ERR_SUCCESS) {
+            printf("\x1b[?25h");
             puts("procview: unable to read process list\n");
             sys_exit(1);
         }
@@ -201,7 +204,7 @@ static void print_table_loop() {
             shown = PROCVIEW_MAX;
         }
 
-        printf("\x1b[2J\x1b[H");
+        printf("\x1b[H");
 
         printf("\x1b[1;36mOpenIDP Process Viewer (Looping)\x1b[0m\n");
         printf("CPUs: ");
@@ -214,15 +217,28 @@ static void print_table_loop() {
         print_u64(info.uptime_ms / 1000);
         printf("s\n\n");
 
-        // Table Header
-        printf("\x1b[1;37mPID     PPID    THREADS RUNNING NAME\x1b[0m\n");
-        printf("--------------------------------------------------\n");
+        printf("\x1b[1;37mPID     PPID    THREADS RUNNING CPU     NAME\x1b[0m\n");
+        printf("----------------------------------------------------------\n");
 
         for (uint64_t i = 0; i < shown; ++i) {
             print_u64_padded(entries[i].pid, 8);
             print_u64_padded(entries[i].parent_pid, 8);
             print_u64_padded(entries[i].thread_count, 8);
             print_u64_padded(entries[i].running_thread_count, 8);
+
+            if (entries[i].cpu_mask == 0) {
+                printf("-       ");
+            } else {
+                uint64_t first_cpu = 0;
+                for (int c = 0; c < 64; c++) {
+                    if (entries[i].cpu_mask & (1ULL << c)) {
+                        first_cpu = c;
+                        break;
+                    }
+                }
+                print_u64_padded(first_cpu, 8);
+            }
+
             printf("%s\n", entries[i].name[0] ? entries[i].name : "(unnamed)");
         }
 
@@ -231,6 +247,8 @@ static void print_table_loop() {
             print_u64(PROCVIEW_MAX);
             printf(" entries\n");
         }
+
+        printf("\x1b[J");
 
         sleep_ms(15000);
     }

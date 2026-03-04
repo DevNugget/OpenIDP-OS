@@ -46,6 +46,7 @@ typedef struct {
     int param_count;
     int value;
     int has_value;
+    int is_dec_private;
 } ansi_parser_t;
 
 static uint8_t g_font_storage[FONT_MAX_BYTES];
@@ -410,6 +411,7 @@ static void ansi_reset_csi(ansi_parser_t* ansi) {
     ansi->param_count = 0;
     ansi->value = 0;
     ansi->has_value = 0;
+    ansi->is_dec_private = 0;
     for (int i = 0; i < ANSI_MAX_PARAMS; ++i) ansi->params[i] = 0;
 }
 
@@ -524,7 +526,9 @@ static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* a
         }
     }
     else if (ansi->state == 5) {
-        if (c >= '0' && c <= '9') {
+        if (c == '?') {
+            ansi->is_dec_private = 1;
+        } else if (c >= '0' && c <= '9') {
             ansi->value = ansi->value * 10 + (c - '0');
             ansi->has_value = 1;
         } else if (c == ';') {
@@ -533,6 +537,14 @@ static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* a
             }
             ansi->value = 0;
             ansi->has_value = 0;
+        } else if (c == 'h' && ansi->is_dec_private && ansi->value == 25) {
+            term->cursor_visible = 1;
+            term->grid[term->row][term->col].dirty = 1;
+            ansi->state = 0;
+        } else if (c == 'l' && ansi->is_dec_private && ansi->value == 25) {
+            term->cursor_visible = 0;
+            term->grid[term->row][term->col].dirty = 1;
+            ansi->state = 0;
         } else if (c == 'm') {
             ansi_apply_sgr(term, ansi);
             ansi->state = 0;

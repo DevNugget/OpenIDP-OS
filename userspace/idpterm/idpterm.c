@@ -337,7 +337,6 @@ void main(int argc, char** argv) {
     }
 
     term.cursor_visible = 1;
-    int blink_counter = 0;
 
     while (1) {
         int needs_render = 0;
@@ -512,23 +511,31 @@ void main(int argc, char** argv) {
             if (ansi_state == 0) needs_render = 1; 
         }
         
-        blink_counter++;
-        if (blink_counter > CARET_BLINK_SPEED) {
-            blink_counter = 0;
-            term.cursor_visible = !term.cursor_visible;
-            term.grid[term.row][term.col].dirty = 1;
-            needs_render = 1;
-        }
+        sysinfo_t sys_info_data;
+        sys_info(&sys_info_data);
 
-        // 2. Keep cursor solid while typing/printing
+        static uint64_t last_activity_time = 0;
+
         if (ipc->key_tail != ipc->key_head || rd > 0) {
             activity_happened = 1;
         }
 
         if (activity_happened) {
-            term.cursor_visible = 1;
-            blink_counter = 0;
-            term.grid[term.row][term.col].dirty = 1;
+            last_activity_time = sys_info_data.uptime_ms;
+            if (!term.cursor_visible) {
+                term.cursor_visible = 1;
+                term.grid[term.row][term.col].dirty = 1;
+                needs_render = 1;
+            }
+        } else {
+            uint64_t time_since_activity = sys_info_data.uptime_ms - last_activity_time;
+            int cursor_should_be_visible = ((time_since_activity % 1000) < 500);
+            
+            if (term.cursor_visible != cursor_should_be_visible) {
+                term.cursor_visible = cursor_should_be_visible;
+                term.grid[term.row][term.col].dirty = 1;
+                needs_render = 1;
+            }
         }
 
         if (needs_render) {

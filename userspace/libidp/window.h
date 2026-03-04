@@ -21,6 +21,7 @@ typedef struct {
 
     char title[WINDOW_TITLE_MAX];
     volatile uint8_t dirty;
+    volatile uint8_t focused;
 
     uint32_t pixels[]; 
 } window_ipc_t;

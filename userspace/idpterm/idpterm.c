@@ -305,6 +305,7 @@ void main(int argc, char** argv) {
 
     term.fg = 15;
     term.bg = 0;
+    term.cursor_visible = 1;
     term_clear(&term);
     const char* banner = "idpterm ready\n";
     for (size_t i=0; banner[i]; ++i) term_putc(&term, banner[i]);
@@ -335,11 +336,8 @@ void main(int argc, char** argv) {
         sys_exit(1);
     }
 
-    term.cursor_visible = 1;
-
     while (1) {
         int needs_render = 0;
-        int activity_happened = 0;
 
         uint32_t new_cols = ipc->width / term.glyph_w;
         uint32_t new_rows = ipc->height / term.glyph_h;
@@ -510,33 +508,6 @@ void main(int argc, char** argv) {
             if (ansi_state == 0) needs_render = 1; 
         }
         
-        sysinfo_t sys_info_data;
-        sys_info(&sys_info_data);
-
-        static uint64_t last_activity_time = 0;
-
-        if (ipc->key_tail != ipc->key_head || rd > 0) {
-            activity_happened = 1;
-        }
-
-        if (activity_happened) {
-            last_activity_time = sys_info_data.uptime_ms;
-            if (!term.cursor_visible) {
-                term.cursor_visible = 1;
-                term.grid[term.row][term.col].dirty = 1;
-                needs_render = 1;
-            }
-        } else {
-            uint64_t time_since_activity = sys_info_data.uptime_ms - last_activity_time;
-            int cursor_should_be_visible = ((time_since_activity % 1000) < 500);
-            
-            if (term.cursor_visible != cursor_should_be_visible) {
-                term.cursor_visible = cursor_should_be_visible;
-                term.grid[term.row][term.col].dirty = 1;
-                needs_render = 1;
-            }
-        }
-
         if (needs_render) {
             term_render(&term); 
             gfx_present(&gfx);

@@ -404,19 +404,30 @@ void main() {
             }
         }
 
-        int needs_render = wm.dirty;
+        int needs_full_arrange = wm.dirty;
         wm.dirty = 0;
-        
-        for (uint8_t i = 0; i < wm.client_count; ++i) {
-            if (wm.clients[i].ipc && wm.clients[i].ipc->dirty) {
-                needs_render = 1;
-                wm.clients[i].ipc->dirty = 0;
-            }
-        }
+        int presented = 0;
 
-        if (needs_render) {
+        if (needs_full_arrange) {
+            for (uint8_t i = 0; i < wm.client_count; ++i) {
+                if (wm.clients[i].ipc) {
+                    wm.clients[i].ipc->focused = (i == wm.focused_index);
+                }
+            }
             wm_arrange(&wm);
             wm_render(&wm);
+            presented = 1;
+        } else {
+            for (uint8_t i = 0; i < wm.client_count; ++i) {
+                if (wm.clients[i].ipc && wm.clients[i].ipc->dirty) {
+                    draw_client(&wm, i); 
+                    wm.clients[i].ipc->dirty = 0;
+                    presented = 1;
+                }
+            }
+            if (presented) {
+                gfx_present(wm.gfx);
+            }
         }
         
         sys_yield();

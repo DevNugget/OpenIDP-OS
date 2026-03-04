@@ -2,6 +2,7 @@
 #define LIBIDP_SYSCALL_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 #define SYS_YIELD 0
 #define SYS_PRINT 1
@@ -25,6 +26,7 @@
 #define SYS_PIPE 19
 #define SYS_FS_WRITE 20
 #define SYS_SYSINFO 21
+#define SYS_PROC_LIST 22
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
@@ -113,6 +115,20 @@ typedef struct sysinfo_t {
     uint32_t procs;
     uint32_t cpus;
 } sysinfo_t;
+
+#define PROC_NAME_LEN 64
+
+typedef struct process_user_info_t {
+    uint64_t pid;
+    uint64_t parent_pid;
+    uint32_t exited;
+    uint32_t thread_count;
+    uint32_t running_thread_count;
+    uint32_t running_tid_count;
+    uint64_t cpu_mask;
+    uint64_t running_tids[8];
+    char name[64];
+} process_user_info_t;
 
 static inline uint64_t syscall_0(uint64_t syscall_num) {
     uint64_t ret;
@@ -262,6 +278,10 @@ static inline int sys_write(uint64_t fd, const void* buffer, uint64_t bytes, uin
 
 static inline int sys_info(sysinfo_t* info) {
     return (int)syscall_1(SYS_SYSINFO, (uint64_t)info);
+}
+
+static inline int sys_proc_list(process_user_info_t* out_entries, uint64_t capacity, uint64_t* out_count) {
+    return (int)syscall_3(SYS_PROC_LIST, (uint64_t)out_entries, capacity, (uint64_t)out_count);
 }
 
 #endif

@@ -13,6 +13,7 @@
 #include <memory/kheap.h>
 #include <memory/pmm.h>
 #include <memory/vmm.h>
+#include <memory/shm.h>
 
 #include <utility/kstring.h>
 #include <utility/spinlock.h>
@@ -616,7 +617,8 @@ static void destroy_failed_process(process_t* process) {
     unlink_process_unsafe(process);
     spinlock_unlock_irqrestore(&process_lock, flags);
 
-    pmm_free(vmm_get_phys(process->pml4), 1);
+    shm_release_process_mappings(process);
+    vmm_destroy_user_address_space(process->pml4);
     kfree(process);
 }
 
@@ -955,7 +957,8 @@ static int reap_exited_processes(void) {
 
     if (dead_proc) {
         if (dead_proc->pml4) {
-            pmm_free(vmm_get_phys(dead_proc->pml4), 1);
+            shm_release_process_mappings(dead_proc);
+            vmm_destroy_user_address_space(dead_proc->pml4);
         }
         kfree(dead_proc);
         return 1;

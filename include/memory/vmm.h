@@ -16,6 +16,7 @@ void vmm_map_page(phys_addr_t* pml4, virt_addr_t virt, phys_addr_t phys, uint64_
 void vmm_unmap_page(phys_addr_t* pml4, virt_addr_t virt);
 virt_addr_t* vmm_create_new_pml4();
 phys_addr_t vmm_get_phys(virt_addr_t* virt_pml4);
+void vmm_destroy_user_address_space(virt_addr_t* pml4);
 
 static inline phys_addr_t read_cr3() {
     phys_addr_t cr3;

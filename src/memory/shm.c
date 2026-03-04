@@ -252,3 +252,33 @@ int shm_destroy(uint64_t handle) {
     spinlock_unlock_irqrestore(&shm_lock, flags);
     return ERR_SUCCESS;
 }
+
+void shm_release_process_mappings(process_t* process) {
+    if (process == NULL || process->pml4 == NULL) {
+        return;
+    }
+
+    uint64_t flags = spinlock_lock_irqsave(&shm_lock);
+
+    shm_mapping_t* mapping = process->shm_mappings;
+    process->shm_mappings = NULL;
+
+    while (mapping != NULL) {
+        shm_mapping_t* next = mapping->next;
+
+        for (size_t i = 0; i < mapping->page_count; ++i) {
+            vmm_unmap_page((phys_addr_t*)process->pml4, mapping->base + (i * PAGE_SIZE));
+        }
+
+        shm_segment_t* segment = find_segment_unsafe(mapping->handle);
+        if (segment != NULL && segment->ref_count > 0) {
+            segment->ref_count--;
+            try_collect_segment_unsafe(segment);
+        }
+
+        kfree(mapping);
+        mapping = next;
+    }
+
+    spinlock_unlock_irqrestore(&shm_lock, flags);
+}

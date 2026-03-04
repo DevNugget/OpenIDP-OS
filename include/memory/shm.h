@@ -19,5 +19,6 @@ int shm_create_from_phys(phys_addr_t phys_base, size_t size_bytes, uint64_t* out
 int shm_map(process_t* process, uint64_t handle, uint64_t* out_addr);
 int shm_unmap(process_t* process, uint64_t address);
 int shm_destroy(uint64_t handle);
+void shm_release_process_mappings(process_t* process);
 
 #endif

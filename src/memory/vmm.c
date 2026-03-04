@@ -134,4 +134,53 @@ uint64_t convert_x86_64_vm_flags(size_t flags) {
     if ((flags & VM_FLAG_EXEC) == 0)
         value |= PT_FLAG_NX;
     return value;
-};
+}
+
+void vmm_destroy_user_address_space(virt_addr_t* pml4) {
+    if (pml4 == NULL) {
+        return;
+    }
+
+    for (size_t pml4_i = 0; pml4_i < 256; ++pml4_i) {
+        if ((pml4[pml4_i] & PT_FLAG_PRESENT) == 0) {
+            continue;
+        }
+
+        virt_addr_t* pdpr = (virt_addr_t*)phys_to_virt(pte_phys_addr(pml4[pml4_i]));
+
+        for (size_t pdpr_i = 0; pdpr_i < 512; ++pdpr_i) {
+            if ((pdpr[pdpr_i] & PT_FLAG_PRESENT) == 0) {
+                continue;
+            }
+
+            virt_addr_t* pd = (virt_addr_t*)phys_to_virt(pte_phys_addr(pdpr[pdpr_i]));
+
+            for (size_t pd_i = 0; pd_i < 512; ++pd_i) {
+                if ((pd[pd_i] & PT_FLAG_PRESENT) == 0) {
+                    continue;
+                }
+
+                virt_addr_t* pt = (virt_addr_t*)phys_to_virt(pte_phys_addr(pd[pd_i]));
+
+                for (size_t pt_i = 0; pt_i < 512; ++pt_i) {
+                    if ((pt[pt_i] & PT_FLAG_PRESENT) == 0) {
+                        continue;
+                    }
+
+                    phys_addr_t page = pte_phys_addr(pt[pt_i]);
+                    if (page != 0) {
+                        pmm_free(page, 1);
+                    }
+                }
+
+                pmm_free(pte_phys_addr(pd[pd_i]), 1);
+            }
+
+            pmm_free(pte_phys_addr(pdpr[pdpr_i]), 1);
+        }
+
+        pmm_free(pte_phys_addr(pml4[pml4_i]), 1);
+    }
+
+    pmm_free(vmm_get_phys(pml4), 1);
+}

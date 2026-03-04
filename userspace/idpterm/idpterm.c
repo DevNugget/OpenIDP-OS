@@ -6,6 +6,7 @@
 
 #define MAX_COLS 256
 #define MAX_ROWS 144
+#define CARET_BLINK_SPEED 10000
 #define FONT_MAX_BYTES (256 * 1024)
 
 typedef struct {
@@ -34,6 +35,7 @@ typedef struct {
     uint32_t glyph_h;
     uint8_t fg;
     uint8_t bg;
+    uint8_t cursor_visible;
 } term_t;
 
 static uint8_t g_font_storage[FONT_MAX_BYTES];
@@ -168,7 +170,7 @@ static void draw_cell(term_t* t, size_t r, size_t c) {
     uint32_t bg_color = color(cell.bg);
     uint32_t fg_color = color(cell.fg);
 
-    if (r == t->row && c == t->col) {
+    if (r == t->row && c == t->col && t->cursor_visible) {
         uint32_t temp = bg_color;
         bg_color = fg_color;
         fg_color = temp;
@@ -334,8 +336,12 @@ void main(int argc, char** argv) {
         sys_exit(1);
     }
 
+    term.cursor_visible = 1;
+    int blink_counter = 0;
+
     while (1) {
         int needs_render = 0;
+        int activity_happened = 0;
 
         uint32_t new_cols = ipc->width / term.glyph_w;
         uint32_t new_rows = ipc->height / term.glyph_h;
@@ -475,6 +481,7 @@ void main(int argc, char** argv) {
                         }
                         ansi_state = 0;
                     } else if (c == 'H') {
+                        term.grid[term.row][term.col].dirty = 1;
                         int r = 1, c_pos = 1;
 
                         if (ansi_param_cnt >= 2) {
@@ -492,6 +499,7 @@ void main(int argc, char** argv) {
                         if (term.row >= term.rows) term.row = term.rows - 1;
                         if (term.col >= term.cols) term.col = term.cols - 1;
 
+                        term.grid[term.row][term.col].dirty = 1;
                         ansi_state = 0;
                     } else {
                         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
@@ -504,6 +512,25 @@ void main(int argc, char** argv) {
             if (ansi_state == 0) needs_render = 1; 
         }
         
+        blink_counter++;
+        if (blink_counter > CARET_BLINK_SPEED) {
+            blink_counter = 0;
+            term.cursor_visible = !term.cursor_visible;
+            term.grid[term.row][term.col].dirty = 1;
+            needs_render = 1;
+        }
+
+        // 2. Keep cursor solid while typing/printing
+        if (ipc->key_tail != ipc->key_head || rd > 0) {
+            activity_happened = 1;
+        }
+
+        if (activity_happened) {
+            term.cursor_visible = 1;
+            blink_counter = 0;
+            term.grid[term.row][term.col].dirty = 1;
+        }
+
         if (needs_render) {
             term_render(&term); 
             gfx_present(&gfx);

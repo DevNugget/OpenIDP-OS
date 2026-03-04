@@ -105,6 +105,13 @@ typedef struct key_event_t {
     uint8_t is_pressed;
 } key_event_t;
 
+typedef struct {
+    uint64_t uptime_ms;
+    uint64_t total_ram;
+    uint64_t free_ram;
+    uint32_t procs;
+    // TODO: expand
+} sysinfo_t;
 
 static inline uint64_t syscall_0(uint64_t syscall_num) {
     uint64_t ret;
@@ -250,6 +257,10 @@ static inline int sys_pipe(uint64_t* read_fd, uint64_t* write_fd) {
 
 static inline int sys_write(uint64_t fd, const void* buffer, uint64_t bytes, uint64_t* out_written) {
     return (int)syscall_4(SYS_FS_WRITE, fd, (uint64_t)buffer, bytes, (uint64_t)out_written);
+}
+
+int sys_info(sysinfo_t* info) {
+    
 }
 
 #endif

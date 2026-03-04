@@ -24,14 +24,7 @@ static void print_u64(uint64_t value) {
 }
 
 static void print_process_on_cpu(const process_user_info_t* entry, uint64_t cpu) {
-    printf("    process: ");
-    if (entry->name[0] != '\0') {
-        printf("%s", entry->name);
-    } else {
-        printf("(unnamed)");
-    }
-
-    printf(" [pid=");
+    printf("    process: %s [pid=", entry->name[0] ? entry->name : "(unnamed)");
     print_u64(entry->pid);
     printf(", ppid=");
     print_u64(entry->parent_pid);
@@ -43,10 +36,12 @@ static void print_process_on_cpu(const process_user_info_t* entry, uint64_t cpu)
 
     int printed_thread = 0;
     for (uint32_t i = 0; i < entry->running_tid_count; ++i) {
-        uint64_t tid = entry->running_tids[i];
-        if (tid == 0) {
+        if (entry->running_cpus[i] != cpu) {
             continue;
         }
+
+        uint64_t tid = entry->running_tids[i];
+        if (tid == 0) continue;
 
         printf("        - running thread tid=");
         print_u64(tid);

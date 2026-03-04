@@ -908,7 +908,7 @@ void scheduler_create_init_processes(void) {
 
     create_thread(kernel_process, reaper_thread_func, NULL, 1);
 
-    //__atomic_store_n(&scheduler_ready_flag, 1, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&scheduler_ready_flag, 1, __ATOMIC_SEQ_CST);
 }
 
 static void idle_thread_func(void* arg) {
@@ -1023,7 +1023,9 @@ size_t scheduler_copy_process_snapshot(process_snapshot_entry_t* buffer, size_t 
                         running_thread_count++;
                     }
                     if (running_tid_count < 8) {
-                        out->running_tids[running_tid_count++] = thr->tid;
+                        out->running_tids[running_tid_count] = thr->tid;
+                        out->running_cpus[running_tid_count] = (uint64_t)thr->last_cpu_slot;
+                        running_tid_count++;
                     }
                 }
             }
@@ -1034,7 +1036,7 @@ size_t scheduler_copy_process_snapshot(process_snapshot_entry_t* buffer, size_t 
             out->cpu_mask = cpu_mask;
 
             strncpy(out->name, p->name, PROC_NAME_LEN - 1);
-            out->name[PROC_NAME_LEN - 1] = '\\0';
+            out->name[PROC_NAME_LEN - 1] = '\0';
         }
 
         count++;

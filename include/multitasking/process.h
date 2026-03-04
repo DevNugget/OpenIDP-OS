@@ -46,6 +46,7 @@ typedef struct process_user_info_t {
     uint32_t running_tid_count;
     uint64_t cpu_mask;
     uint64_t running_tids[8];
+    uint64_t running_cpus[8];
     char name[64];
 } process_user_info_t;
 

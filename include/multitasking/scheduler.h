@@ -32,6 +32,7 @@ typedef struct process_snapshot_entry_t {
     uint32_t running_tid_count;
     uint64_t cpu_mask;
     uint64_t running_tids[8];
+    uint64_t running_cpus[8];
     char name[PROC_NAME_LEN];
 } process_snapshot_entry_t;
 

@@ -191,9 +191,15 @@ void main(int argc, char** argv) {
     char resolved_path[MAX_PATH];
     char bin_path[MAX_PATH];
 
+    int last_err_code = 0;
+
     while (1) {
         printf("\x1b]0;idpshell\x07");
-        printf("\x1b[35midpshell %s :: \x1b[0m", cwd);
+        if (last_err_code != 0) {
+            printf("\x1b[31merr\x1b[90m(\x1b[37m%d\x1b[90m) :: \x1b[35m@\x1b[90m[\x1b[34m%s\x1b[90m] :: \x1b[0m", last_err_code, cwd);
+        } else {
+            printf("\x1b[32merr\x1b[90m(\x1b[37m%d\x1b[90m) :: \x1b[35m@\x1b[90m[\x1b[34m%s\x1b[90m] :: \x1b[0m", last_err_code, cwd);
+        }
         read_line(line, sizeof(line));
         
         int token_argc = tokenize(line, token_argv, MAX_TOKENS);
@@ -274,9 +280,7 @@ void main(int argc, char** argv) {
                 sys_yield();
             }
             
-            if (code != 0) {
-                printf("idpshell: process %d exited with code %d\n", pid, code);
-            }
+            last_err_code = code;
         }
     }
 }

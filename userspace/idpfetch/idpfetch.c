@@ -39,7 +39,7 @@ static void print_memory_usage(uint64_t used_ram, uint64_t total_ram) {
     uint64_t mib = 1024 * 1024;
 
     print_u64(used_ram / mib);
-    printf(" MiB / ");
+    printf("/");
     print_u64(total_ram / mib);
     printf(" MiB");
 }

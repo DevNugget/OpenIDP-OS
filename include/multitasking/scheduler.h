@@ -21,4 +21,6 @@ int scheduler_spawn_process(const char* path, const char** user_argv, size_t par
 int scheduler_kill_process_tree(size_t pid, int exit_code);
 int scheduler_wait_process(size_t waiter_pid, size_t target_pid, int* out_exit_code);
 
+size_t scheduler_get_process_count(void);
+
 #endif

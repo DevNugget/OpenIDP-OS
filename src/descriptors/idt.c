@@ -154,6 +154,7 @@ cpu_status_t* interrupt_dispatch(cpu_status_t* context) {
 
         case 0x20: {
             ctx = schedule(context);
+            inc_uptime();
             break;
         }
 

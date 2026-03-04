@@ -15,4 +15,7 @@ void pmm_init();
 phys_addr_t pmm_alloc(size_t frame_count);
 void pmm_free(phys_addr_t addr, size_t frame_count);
 
+uint64_t pmm_get_total_pages(void);
+uint64_t pmm_get_used_pages(void);
+
 #endif //PMM_H

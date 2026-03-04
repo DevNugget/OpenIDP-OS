@@ -68,3 +68,13 @@ void smp_init(void) {
 size_t smp_get_cpu_count(void) {
     return smp_cpu_count;
 }
+
+bool smp_is_bsp(void) {
+    struct limine_mp_response* response = smp_mp_request.response;
+    
+    if (response == NULL) {
+        return true;
+    }
+
+    return apic_get_id() == response->bsp_lapic_id;
+}

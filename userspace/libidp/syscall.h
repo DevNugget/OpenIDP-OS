@@ -24,6 +24,7 @@
 #define SYS_FS_CLOSE 18
 #define SYS_PIPE 19
 #define SYS_FS_WRITE 20
+#define SYS_SYSINFO 21
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
@@ -105,12 +106,12 @@ typedef struct key_event_t {
     uint8_t is_pressed;
 } key_event_t;
 
-typedef struct {
+typedef struct sysinfo_t {
     uint64_t uptime_ms;
     uint64_t total_ram;
     uint64_t free_ram;
     uint32_t procs;
-    // TODO: expand
+    uint32_t cpus;
 } sysinfo_t;
 
 static inline uint64_t syscall_0(uint64_t syscall_num) {
@@ -259,8 +260,8 @@ static inline int sys_write(uint64_t fd, const void* buffer, uint64_t bytes, uin
     return (int)syscall_4(SYS_FS_WRITE, fd, (uint64_t)buffer, bytes, (uint64_t)out_written);
 }
 
-int sys_info(sysinfo_t* info) {
-    
+static inline int sys_info(sysinfo_t* info) {
+    return (int)syscall_1(SYS_SYSINFO, (uint64_t)info);
 }
 
 #endif

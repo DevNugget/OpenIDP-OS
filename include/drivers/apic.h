@@ -44,6 +44,7 @@ void apic_timer_start(uint16_t hz);
 void apic_eoi();
 uint32_t apic_get_id();
 void apic_enable_local(void);
+void inc_uptime();
 
 /* PIC 8259 ports & ICW */
 #define PIC_COMMAND_MASTER 0x20

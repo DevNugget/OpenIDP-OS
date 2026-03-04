@@ -4,11 +4,14 @@
 #include <utility/port.h>
 #include <utility/hhdm.h>
 #include <memory/vmm.h>
+#include <multitasking/smp.h>
 
 extern virt_addr_t* kernel_pml4;
 volatile uint32_t* io_apic_base;
 volatile uint32_t* lapic_regs;
 uint32_t lapic_ticks_per_ms = 0;
+
+volatile uint64_t system_uptime_ms = 0;
 
 static inline uint64_t read_msr(uint32_t msr) {
     uint32_t lower;
@@ -144,4 +147,19 @@ void apic_timer_init(uint16_t hz) {
 
     serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
     apic_timer_start(hz);
+}
+
+void inc_uptime() {
+    if (lapic_ticks_per_ms == 0) {
+        return;
+    }
+
+    if (!smp_is_bsp()) {
+        return;
+    }
+
+    uint32_t timer_init_val = lapic_regs[TIMER_INIT/4];
+    uint64_t ms_per_tick = timer_init_val / lapic_ticks_per_ms;
+
+    __atomic_add_fetch(&system_uptime_ms, ms_per_tick, __ATOMIC_RELAXED);
 }

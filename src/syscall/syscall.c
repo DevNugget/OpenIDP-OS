@@ -4,7 +4,9 @@
 #include <drivers/keyboard.h>
 #include <drivers/mouse.h>
 #include <multitasking/scheduler.h>
+#include <multitasking/smp.h>
 #include <memory/shm.h>
+#include <memory/pmm.h>
 #include <utility/kstring.h>
 #include <fs/vfs.h>
 
@@ -302,6 +304,27 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             } else {
                 context->rax = (uint64_t)ERR_FAIL;
             }
+            break;
+        }
+
+        case SYS_SYSINFO: {
+            sysinfo_t* user_info = (sysinfo_t*)context->rdi;
+            if (user_info == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            extern volatile uint64_t system_uptime_ms;
+
+            sysinfo_t info;
+            info.uptime_ms = system_uptime_ms;
+            info.total_ram = pmm_get_total_pages() * PAGE_SIZE;
+            info.free_ram = (pmm_get_total_pages() - pmm_get_used_pages()) * PAGE_SIZE;
+            info.procs = (uint32_t)scheduler_get_process_count();
+            info.cpus = (uint32_t)smp_get_cpu_count();
+
+            *user_info = info;
+            context->rax = ERR_SUCCESS;
             break;
         }
 

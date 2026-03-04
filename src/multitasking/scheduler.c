@@ -973,3 +973,13 @@ static void reaper_thread_func(void* arg) {
         }
     }
 }
+
+size_t scheduler_get_process_count(void) {
+    size_t count = 0;
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+    for (process_t* p = processes_list; p != NULL; p = p->next) {
+        count++;
+    }
+    spinlock_unlock_irqrestore(&process_lock, flags);
+    return count;
+}

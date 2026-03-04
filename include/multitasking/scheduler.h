@@ -23,4 +23,18 @@ int scheduler_wait_process(size_t waiter_pid, size_t target_pid, int* out_exit_c
 
 size_t scheduler_get_process_count(void);
 
+typedef struct process_snapshot_entry_t {
+    uint64_t pid;
+    uint64_t parent_pid;
+    uint32_t exited;
+    uint32_t thread_count;
+    uint32_t running_thread_count;
+    uint32_t running_tid_count;
+    uint64_t cpu_mask;
+    uint64_t running_tids[8];
+    char name[PROC_NAME_LEN];
+} process_snapshot_entry_t;
+
+size_t scheduler_copy_process_snapshot(process_snapshot_entry_t* buffer, size_t capacity);
+
 #endif

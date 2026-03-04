@@ -328,6 +328,22 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             break;
         }
 
+        case SYS_PROC_LIST: {
+            process_user_info_t* user_entries = (process_user_info_t*)context->rdi;
+            size_t capacity = (size_t)context->rsi;
+            uint64_t* user_count = (uint64_t*)(uintptr_t)context->rdx;
+
+            if (user_count == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            size_t total_count = scheduler_copy_process_snapshot((process_snapshot_entry_t*)user_entries, capacity);
+            *user_count = (uint64_t)total_count;
+            context->rax = ERR_SUCCESS;
+            break;
+        }
+
         default:
             serial_printf("[SYSCALL] Unknown syscall number: %u\n", (uint32_t)syscall_num);
             context->rax = (uint64_t)ERR_FAIL; 

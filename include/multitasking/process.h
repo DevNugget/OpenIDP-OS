@@ -37,6 +37,18 @@ typedef struct process_t {
     struct vfs_file* fd_table[PROCESS_MAX_FDS];
 } process_t;
 
+typedef struct process_user_info_t {
+    uint64_t pid;
+    uint64_t parent_pid;
+    uint32_t exited;
+    uint32_t thread_count;
+    uint32_t running_thread_count;
+    uint32_t running_tid_count;
+    uint64_t cpu_mask;
+    uint64_t running_tids[8];
+    char name[64];
+} process_user_info_t;
+
 typedef struct thread_t {
     size_t tid;
     thread_status_t status;
@@ -48,6 +60,7 @@ typedef struct thread_t {
     uint8_t* simd_state;
     uint8_t simd_state_valid;
     uint32_t quantum_ticks;
+    int32_t last_cpu_slot;
     uint8_t is_user_thread;
     process_t* parent;
     struct thread_t* next;

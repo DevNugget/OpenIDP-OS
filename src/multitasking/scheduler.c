@@ -435,6 +435,7 @@ cpu_status_t* schedule(cpu_status_t* context) {
 
     current_threads[cpu_index] = next_thread;
     next_thread->status = THREAD_RUNNING;
+    next_thread->last_cpu_slot = (int32_t)cpu_index;
     next_thread->quantum_ticks = 0;
 
     restore_or_init_simd_state(next_thread);
@@ -516,6 +517,7 @@ static thread_t* create_thread(process_t* parent, void(*function)(void*), void* 
     }
 
     thread->status = THREAD_READY;
+    thread->last_cpu_slot = -1;
     thread->parent = parent;
     thread->entry = function;
     thread->entry_arg = arg;
@@ -548,6 +550,7 @@ static thread_t* create_user_thread(process_t* parent, uint64_t entry_point, int
     }
 
     thread->status = THREAD_READY;
+    thread->last_cpu_slot = -1;
     thread->parent = parent;
     thread->is_user_thread = 1;
 
@@ -983,6 +986,60 @@ size_t scheduler_get_process_count(void) {
     for (process_t* p = processes_list; p != NULL; p = p->next) {
         count++;
     }
+    spinlock_unlock_irqrestore(&process_lock, flags);
+    return count;
+}
+
+size_t scheduler_copy_process_snapshot(process_snapshot_entry_t* buffer, size_t capacity) {
+    size_t count = 0;
+    uint64_t flags = spinlock_lock_irqsave(&process_lock);
+
+    for (process_t* p = processes_list; p != NULL; p = p->next) {
+        if (p->exited) {
+            continue;
+        }
+
+        if (buffer != NULL && count < capacity) {
+            process_snapshot_entry_t* out = &buffer[count];
+            memset(out, 0, sizeof(*out));
+
+            out->pid = p->pid;
+            out->parent_pid = p->parent_pid;
+            out->exited = 0;
+
+            uint32_t thread_count = 0;
+            uint32_t running_thread_count = 0;
+            uint32_t running_tid_count = 0;
+            uint64_t cpu_mask = 0;
+
+            for (thread_t* thr = p->threads; thr != NULL; thr = thr->sibling) {
+                if (thread_count < 4096) {
+                    thread_count++;
+                }
+
+                if (thr->status == THREAD_RUNNING && thr->last_cpu_slot >= 0 && thr->last_cpu_slot < 64) {
+                    cpu_mask |= (1ULL << (uint32_t)thr->last_cpu_slot);
+                    if (running_thread_count < 4096) {
+                        running_thread_count++;
+                    }
+                    if (running_tid_count < 8) {
+                        out->running_tids[running_tid_count++] = thr->tid;
+                    }
+                }
+            }
+
+            out->thread_count = thread_count;
+            out->running_thread_count = running_thread_count;
+            out->running_tid_count = running_tid_count;
+            out->cpu_mask = cpu_mask;
+
+            strncpy(out->name, p->name, PROC_NAME_LEN - 1);
+            out->name[PROC_NAME_LEN - 1] = '\\0';
+        }
+
+        count++;
+    }
+
     spinlock_unlock_irqrestore(&process_lock, flags);
     return count;
 }

@@ -4,6 +4,15 @@
 
 #define PROCVIEW_MAX 128
 
+static int streq(const char* a, const char* b) {
+    while (*a && *b) {
+        if (*a != *b) return 0;
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
 static void print_u64(uint64_t value) {
     char buffer[32];
     int index = 0;
@@ -20,6 +29,30 @@ static void print_u64(uint64_t value) {
 
     while (index > 0) {
         putchar(buffer[--index]);
+    }
+}
+
+static void print_u64_padded(uint64_t value, int width) {
+    char buffer[32];
+    int index = 0;
+
+    if (value == 0) {
+        buffer[index++] = '0';
+    } else {
+        uint64_t temp = value;
+        while (temp > 0 && index < (int)sizeof(buffer)) {
+            buffer[index++] = (char)('0' + (temp % 10));
+            temp /= 10;
+        }
+    }
+
+    int printed = index;
+    while (index > 0) {
+        putchar(buffer[--index]);
+    }
+    while (printed < width) {
+        putchar(' ');
+        printed++;
     }
 }
 
@@ -56,9 +89,20 @@ static void print_process_on_cpu(const process_user_info_t* entry, uint64_t cpu)
     }
 }
 
-void main(int argc, char** argv) {
-    stdio_arginit(&argc, argv);
+static void sleep_ms(uint64_t ms) {
+    sysinfo_t info;
+    if (sys_info(&info) != ERR_SUCCESS) return;
+    
+    uint64_t start_time = info.uptime_ms;
+    
+    while (1) {
+        if (sys_info(&info) != ERR_SUCCESS) break;
+        if ((info.uptime_ms - start_time) >= ms) break;
+        sys_yield();
+    }
+}
 
+static void print_snapshot() {
     process_user_info_t entries[PROCVIEW_MAX];
     uint64_t total = 0;
 
@@ -133,6 +177,82 @@ void main(int argc, char** argv) {
         printf("\nprocview: output truncated to ");
         print_u64(PROCVIEW_MAX);
         printf(" entries\n");
+    }
+}
+
+static void print_table_loop() {
+    while (1) {
+        process_user_info_t entries[PROCVIEW_MAX];
+        uint64_t total = 0;
+
+        if (sys_proc_list(entries, PROCVIEW_MAX, &total) != ERR_SUCCESS) {
+            puts("procview: unable to read process list\n");
+            sys_exit(1);
+        }
+
+        sysinfo_t info;
+        uint64_t cpu_count = 1;
+        if (sys_info(&info) == ERR_SUCCESS && info.cpus > 0) {
+            cpu_count = info.cpus;
+        }
+
+        uint64_t shown = total;
+        if (shown > PROCVIEW_MAX) {
+            shown = PROCVIEW_MAX;
+        }
+
+        printf("\x1b[2J\x1b[H");
+
+        printf("\x1b[1;36mOpenIDP Process Viewer (Looping)\x1b[0m\n");
+        printf("CPUs: ");
+        print_u64(cpu_count);
+        printf(" | Procs: ");
+        print_u64(shown);
+        printf("/");
+        print_u64(total);
+        printf(" | Uptime: ");
+        print_u64(info.uptime_ms / 1000);
+        printf("s\n\n");
+
+        // Table Header
+        printf("\x1b[1;37mPID     PPID    THREADS RUNNING NAME\x1b[0m\n");
+        printf("--------------------------------------------------\n");
+
+        for (uint64_t i = 0; i < shown; ++i) {
+            print_u64_padded(entries[i].pid, 8);
+            print_u64_padded(entries[i].parent_pid, 8);
+            print_u64_padded(entries[i].thread_count, 8);
+            print_u64_padded(entries[i].running_thread_count, 8);
+            printf("%s\n", entries[i].name[0] ? entries[i].name : "(unnamed)");
+        }
+
+        if (total > PROCVIEW_MAX) {
+            printf("\nprocview: output truncated to ");
+            print_u64(PROCVIEW_MAX);
+            printf(" entries\n");
+        }
+
+        sleep_ms(15000);
+    }
+}
+
+void main(int argc, char** argv) {
+    stdio_arginit(&argc, argv);
+
+    int loop_mode = 0;
+
+    for (int i = 1; i < argc; i++) {
+        if (streq(argv[i], "-loop")) {
+            loop_mode = 1;
+        } else if (streq(argv[i], "-snap")) {
+            loop_mode = 0;
+        }
+    }
+
+    if (loop_mode) {
+        print_table_loop();
+    } else {
+        print_snapshot();
     }
 
     sys_exit(0);

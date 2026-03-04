@@ -10,6 +10,8 @@ extern virt_addr_t* kernel_pml4;
 volatile uint32_t* io_apic_base;
 volatile uint32_t* lapic_regs;
 uint32_t lapic_ticks_per_ms = 0;
+static uint16_t lapic_timer_hz = 0;
+static uint64_t uptime_ms_remainder = 0;
 
 volatile uint64_t system_uptime_ms = 0;
 
@@ -128,10 +130,17 @@ void apic_timer_start(uint16_t hz) {
     if (lapic_regs == NULL || lapic_ticks_per_ms == 0 || hz == 0) {
         return;
     }
+    
+    lapic_timer_hz = hz;
+
+    uint64_t ticks_per_interrupt = ((uint64_t)lapic_ticks_per_ms * 1000ULL) / (uint64_t)hz;
+    if (ticks_per_interrupt == 0) {
+        ticks_per_interrupt = 1;
+    }
 
     lapic_regs[TIMER_LVT/4] = TIMER_VECTOR | (1 << 17);
     lapic_regs[TIMER_DIV/4] = 0x3;
-    lapic_regs[TIMER_INIT/4] = lapic_ticks_per_ms * (1000 / hz);
+    lapic_regs[TIMER_INIT/4] = (uint32_t)ticks_per_interrupt;
 }
 
 /* APIC Timer */
@@ -150,7 +159,7 @@ void apic_timer_init(uint16_t hz) {
 }
 
 void inc_uptime() {
-    if (lapic_ticks_per_ms == 0) {
+    if (lapic_timer_hz == 0) {
         return;
     }
 
@@ -158,8 +167,9 @@ void inc_uptime() {
         return;
     }
 
-    uint32_t timer_init_val = lapic_regs[TIMER_INIT/4];
-    uint64_t ms_per_tick = timer_init_val / lapic_ticks_per_ms;
+    uptime_ms_remainder += 1000;
+    uint64_t delta_ms = uptime_ms_remainder / lapic_timer_hz;
+    uptime_ms_remainder %= lapic_timer_hz;
 
-    __atomic_add_fetch(&system_uptime_ms, ms_per_tick, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&system_uptime_ms, delta_ms, __ATOMIC_RELAXED);
 }

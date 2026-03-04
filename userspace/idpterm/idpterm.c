@@ -6,7 +6,6 @@
 
 #define MAX_COLS 256
 #define MAX_ROWS 144
-#define CARET_BLINK_SPEED 10000
 #define FONT_MAX_BYTES (256 * 1024)
 
 typedef struct {

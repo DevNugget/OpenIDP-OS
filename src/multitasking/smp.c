@@ -48,17 +48,16 @@ void smp_init(void) {
 
     smp_cpu_count = (size_t)response->cpu_count;
     uint64_t target_cpus = response->cpu_count;
+    
+    // Force BSP to be 0, and cleanly assign 1..N to APs
+    size_t ap_index = 1; 
     for (uint64_t i = 0; i < response->cpu_count; i++) {
         struct limine_mp_info* cpu = response->cpus[i];
-        if (cpu == NULL) {
-            continue;
-        }
+        if (cpu == NULL) continue;
 
-        if (cpu->lapic_id == response->bsp_lapic_id) {
-            continue;
-        }
+        if (cpu->lapic_id == response->bsp_lapic_id) continue;
 
-        cpu->extra_argument = i;
+        cpu->extra_argument = ap_index++;
         cpu->goto_address = smp_ap_entry;
     }
 
@@ -81,4 +80,22 @@ bool smp_is_bsp(void) {
     }
 
     return apic_get_id() == response->bsp_lapic_id;
+}
+
+size_t smp_current_cpu_index(void) {
+    struct limine_mp_response* response = smp_mp_request.response;
+    if (response == NULL) return 0;
+    
+    uint32_t lapic_id = apic_get_id();
+    if (lapic_id == response->bsp_lapic_id) return 0;
+    
+    size_t ap_index = 1;
+    for (uint64_t i = 0; i < response->cpu_count; i++) {
+        struct limine_mp_info* cpu = response->cpus[i];
+        if (cpu == NULL || cpu->lapic_id == response->bsp_lapic_id) continue;
+        
+        if (cpu->lapic_id == lapic_id) return ap_index;
+        ap_index++;
+    }
+    return 0;
 }

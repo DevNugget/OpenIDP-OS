@@ -124,7 +124,7 @@ void idt_init() {
 
 void idt_init_cpu(void) {
     load_idt(idt);
-    asm volatile ("sti");
+    //asm volatile ("sti");
 }
 
 cpu_status_t* interrupt_dispatch(cpu_status_t* context) {

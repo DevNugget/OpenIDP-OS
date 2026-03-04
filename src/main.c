@@ -131,8 +131,6 @@ void kmain(void) {
         serial_write_str("[KERNEL] framebuffer shared memory init failed\n");
     }
     
-    //create_process("worker1", worker_1, "TestArg");
-    //create_process("worker2", worker_2, "TestArg");
     char wm_argv[16][64] = {{"/nvme/bin/idpwm.elf"}};
     create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf", 1, wm_argv);
     //create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");

@@ -33,6 +33,8 @@
 
 #define VFS_O_READ 0x1
 
+extern size_t smp_current_cpu_index(void);
+
 extern virt_addr_t* kernel_pml4;
 
 static thread_t* run_queue_head = NULL;
@@ -127,25 +129,7 @@ static inline size_t cpu_slot_index(void) {
         return 0;
     }
 
-    uint32_t apic_id = apic_get_id();
-    uint64_t flags = spinlock_lock_irqsave(&cpu_map_lock);
-
-    for (size_t i = 0; i < cpu_slots_used; ++i) {
-        if (cpu_apic_ids[i] == apic_id) {
-            spinlock_unlock_irqrestore(&cpu_map_lock, flags);
-            return i;
-        }
-    }
-
-    if (cpu_slots_used < scheduler_cpu_count) {
-        cpu_apic_ids[cpu_slots_used] = apic_id;
-        cpu_slots_used++;
-        spinlock_unlock_irqrestore(&cpu_map_lock, flags);
-        return cpu_slots_used - 1;
-    }
-
-    spinlock_unlock_irqrestore(&cpu_map_lock, flags);
-    return 0;
+    return smp_current_cpu_index();
 }
 
 thread_t* scheduler_current_thread(void) {
@@ -809,7 +793,7 @@ int scheduler_spawn_process(const char* path, const char** user_argv, size_t par
         argc = 1;
     }
 
-    process_t* process = create_user_process_from_path("spawned", path, argc, kernel_argv);
+    process_t* process = create_user_process_from_path(kernel_argv[0], path, argc, kernel_argv);
     if (process == NULL) return -1;
 
     uint64_t flags = spinlock_lock_irqsave(&process_lock);
@@ -898,7 +882,7 @@ static void reaper_thread_func(void* arg);
 volatile int scheduler_ready_flag = 0;
 
 void scheduler_create_init_processes(void) {
-    process_t* kernel_process = create_process("system", NULL, NULL);
+    process_t* kernel_process = create_process("kernel", NULL, NULL);
 
     process_t* idle_process = create_process("idle", NULL, NULL); 
     for (size_t i = 0; i < scheduler_cpu_count; i++) {

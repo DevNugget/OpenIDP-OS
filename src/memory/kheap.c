@@ -32,6 +32,7 @@ typedef struct large_alloc_header {
     uint32_t magic;
     uint32_t page_count;
     size_t requested_size;
+    struct large_alloc_header* next;
 } large_alloc_header_t;
 
 static const size_t slab_sizes[MAX_SLAB_CLASSES] = {
@@ -41,6 +42,9 @@ static const size_t slab_sizes[MAX_SLAB_CLASSES] = {
 static slab_class_t slab_classes[MAX_SLAB_CLASSES];
 static virt_addr_t kheap_start;
 static virt_addr_t heap_current_max;
+
+static large_alloc_header_t* free_large_blocks = NULL;
+#define FREE_LARGE_MAGIC 0x46524545u
 
 extern virt_addr_t* kernel_pml4;
 extern virt_addr_t kernel_virt_base;
@@ -254,12 +258,41 @@ void* kmalloc(size_t size) {
 
     size_t total = size + sizeof(large_alloc_header_t);
     size_t pages = ALIGN_UP(total, PAGE_SIZE) / PAGE_SIZE;
+
+    large_alloc_header_t** prev = &free_large_blocks;
+    large_alloc_header_t* curr = free_large_blocks;
+    large_alloc_header_t* best_fit = NULL;
+    large_alloc_header_t** best_fit_prev = NULL;
+
+    while (curr != NULL) {
+        if (curr->page_count >= pages) {
+            // Find the smallest block that still satisfies the request
+            if (best_fit == NULL || curr->page_count < best_fit->page_count) {
+                best_fit = curr;
+                best_fit_prev = prev;
+            }
+        }
+        prev = &curr->next;
+        curr = curr->next;
+    }
+
+    // If we found a reusable block, take it off the free list
+    if (best_fit != NULL) {
+        *best_fit_prev = best_fit->next;
+        best_fit->magic = LARGE_MAGIC;
+        best_fit->requested_size = size;
+        best_fit->next = NULL;
+        spinlock_unlock_irqrestore(&heap_lock, flags);
+        return (void*)((uintptr_t)best_fit + sizeof(large_alloc_header_t));
+    }
+
     virt_addr_t base = map_heap_pages(pages);
 
     large_alloc_header_t* header = (large_alloc_header_t*)base;
     header->magic = LARGE_MAGIC;
     header->page_count = pages;
     header->requested_size = size;
+    header->next = NULL;
 
     spinlock_unlock_irqrestore(&heap_lock, flags);
     return (void*)((uintptr_t)header + sizeof(large_alloc_header_t));
@@ -283,7 +316,11 @@ void kfree(void* ptr) {
 
     if (magic == LARGE_MAGIC) {
         large_alloc_header_t* header = (large_alloc_header_t*)page_base;
-        header->magic = 0;
+
+        header->magic = FREE_LARGE_MAGIC;
+        header->next = free_large_blocks;
+        free_large_blocks = header;
+
         spinlock_unlock_irqrestore(&heap_lock, flags);
         return;
     }

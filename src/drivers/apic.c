@@ -145,7 +145,7 @@ void apic_timer_init(uint16_t hz) {
     lapic_ticks_per_ms = ticks_passed / 10;
 
     serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
-    apic_timer_start(hz);
+    //apic_timer_start(hz);
 }
 
 void inc_uptime() {

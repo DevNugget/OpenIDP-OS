@@ -16,6 +16,7 @@ static volatile struct limine_mp_request smp_mp_request = {
 
 static volatile uint64_t smp_online_cpus = 1;
 static volatile size_t smp_cpu_count = 1;
+extern volatile int scheduler_ready_flag;
 
 static void smp_ap_entry(struct limine_mp_info* info) {
     size_t cpu_index = (size_t)info->extra_argument;
@@ -24,9 +25,12 @@ static void smp_ap_entry(struct limine_mp_info* info) {
     
     idt_init_cpu();
     apic_enable_local();
-    apic_timer_start(500);
-
+    
     __atomic_add_fetch(&smp_online_cpus, 1, __ATOMIC_SEQ_CST);
+    while (__atomic_load_n(&scheduler_ready_flag, __ATOMIC_SEQ_CST) == 0) {
+        asm volatile ("pause");
+    }
+    apic_timer_start(500);
 
     asm volatile ("sti");
     for (;;) {

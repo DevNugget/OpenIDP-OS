@@ -281,7 +281,7 @@ __attribute__((noreturn)) void thread_exit(void) {
         current_thread->status = THREAD_DEAD;
     }
 
-    asm volatile ("int $0x20");
+    asm volatile ("int $0x80" : : "a"(0));
 
     for (;;) {
         asm volatile ("hlt");
@@ -959,7 +959,7 @@ static void reaper_thread_func(void* arg) {
         int reaped_process = reap_exited_processes();
 
         if (!reaped_thread && !reaped_process) {
-            asm volatile ("int $0x20");
+            asm volatile ("int $0x80" : : "a"(0));
         }
     }
 }

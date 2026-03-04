@@ -141,13 +141,22 @@ void apic_timer_init(uint16_t hz) {
     lapic_regs[TIMER_DIV/4] = 0x3;
     lapic_regs[TIMER_LVT/4] = (1 << 16);
     lapic_regs[TIMER_INIT/4] = 0xFFFFFFFF;
+    
     pit_sleep(10);
+    
     lapic_regs[TIMER_LVT/4] = (1 << 16);
     uint32_t current_ticks = lapic_regs[TIMER_CURR/4];
     uint32_t ticks_passed = 0xFFFFFFFF - current_ticks;
     lapic_ticks_per_ms = ticks_passed / 10;
 
-    serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
+    // Fix: Fallback if calibration fails or returns an impossibly small value
+    if (lapic_ticks_per_ms < 1000) {
+        // Assume a generic 10 MHz APIC timer for VMs (10,000 ticks per ms)
+        lapic_ticks_per_ms = 10000;
+        serial_printf("[APIC] Calibration returned bad value. Using fallback: %d\n", lapic_ticks_per_ms);
+    } else {
+        serial_printf("[APIC](apic_timer_init) Timer calibrated: %d ticks per ms\n", lapic_ticks_per_ms);
+    }
 }
 
 void inc_uptime() {
@@ -161,6 +170,7 @@ void inc_uptime() {
 
     uint32_t timer_init_val = lapic_regs[TIMER_INIT/4];
     uint64_t ms_per_tick = timer_init_val / lapic_ticks_per_ms;
+    serial_printf("%d\n", ms_per_tick);
 
     __atomic_add_fetch(&system_uptime_ms, ms_per_tick, __ATOMIC_RELAXED);
 }

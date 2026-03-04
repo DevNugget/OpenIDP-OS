@@ -214,7 +214,16 @@ static void print_table_loop() {
         printf("/");
         print_u64(total);
         printf(" | Uptime: ");
-        print_u64(info.uptime_ms / 1000);
+        uint64_t total_seconds = info.uptime_ms / 1000;
+        uint64_t hours = total_seconds / 3600;
+        uint64_t minutes = (total_seconds % 3600) / 60;
+        uint64_t seconds = total_seconds % 60;
+
+        print_u64(hours);
+        printf("h ");
+        print_u64(minutes);
+        printf("m ");
+        print_u64(seconds);
         printf("s\n\n");
 
         printf("\x1b[1;37mPID     PPID    THREADS RUNNING CPU     NAME\x1b[0m\n");
@@ -250,7 +259,7 @@ static void print_table_loop() {
 
         printf("\x1b[J");
 
-        sleep_ms(15000);
+        sleep_ms(1000);
     }
 }
 

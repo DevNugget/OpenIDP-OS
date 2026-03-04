@@ -329,7 +329,7 @@ static int init_term_state(term_t* term, gfx_context_t* gfx, window_ipc_t* ipc) 
     term->cursor_visible = 1;
     term_clear(term);
 
-    const char* banner = "idpterm ready\n";
+    const char* banner = "libgfx -> idpterm\n";
     for (size_t i = 0; banner[i]; ++i) term_putc(term, banner[i]);
     return 0;
 }
@@ -552,6 +552,23 @@ static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* a
             int mode = ansi->has_value ? ansi->value : 0;
             if (mode == 2) {
                 term_clear(term);
+            } else if (mode == 0) {
+                for (size_t c_idx = term->col; c_idx < term->cols; c_idx++) {
+                    term->grid[term->row][c_idx] = (cell_t){' ', term->fg, term->bg, 1};
+                }
+                for (size_t r_idx = term->row + 1; r_idx < term->rows; r_idx++) {
+                    for (size_t c_idx = 0; c_idx < term->cols; c_idx++) {
+                        term->grid[r_idx][c_idx] = (cell_t){' ', term->fg, term->bg, 1};
+                    }
+                }
+            }
+            ansi->state = 0;
+        } else if (c == 'K') {
+            int mode = ansi->has_value ? ansi->value : 0;
+            if (mode == 0) {
+                for (size_t c_idx = term->col; c_idx < term->cols; c_idx++) {
+                    term->grid[term->row][c_idx] = (cell_t){' ', term->fg, term->bg, 1};
+                }
             }
             ansi->state = 0;
         } else if (c == 'H') {

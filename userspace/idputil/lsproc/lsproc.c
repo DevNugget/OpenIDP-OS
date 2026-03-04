@@ -206,7 +206,7 @@ static void print_table_loop() {
 
         printf("\x1b[H");
 
-        printf("\x1b[1;36mOpenIDP Process Viewer (Looping)\x1b[0m\n");
+        printf("\x1b[1;36m\x1b[KProcess Viewer (Looping)\x1b[0m\n");
         printf("CPUs: ");
         print_u64(cpu_count);
         printf(" | Procs: ");
@@ -224,19 +224,25 @@ static void print_table_loop() {
         print_u64(minutes);
         printf("m ");
         print_u64(seconds);
-        printf("s\n\n");
+        printf("s\x1b[K\n\x1b[K\n");
 
-        printf("\x1b[1;37mPID     PPID    THREADS RUNNING CPU     NAME\x1b[0m\n");
-        printf("----------------------------------------------------------\n");
+        printf("\x1b[1;37m\x1b[35mPID     PPID    THREADS RUNNING CPU     NAME\x1b[0m\x1b[K\n");
+        printf("----------------------------------------------------------\x1b[K\n");
 
         for (uint64_t i = 0; i < shown; ++i) {
             print_u64_padded(entries[i].pid, 8);
             print_u64_padded(entries[i].parent_pid, 8);
             print_u64_padded(entries[i].thread_count, 8);
+            if (entries[i].running_thread_count == 0) {
+                printf("\x1b[31m");
+            } else {
+                printf("\x1b[32m");
+            }
             print_u64_padded(entries[i].running_thread_count, 8);
+            printf("\x1b[0m");
 
             if (entries[i].cpu_mask == 0) {
-                printf("-       ");
+                printf("\x1b[31m-\x1b[0m       ");
             } else {
                 uint64_t first_cpu = 0;
                 for (int c = 0; c < 64; c++) {
@@ -245,16 +251,22 @@ static void print_table_loop() {
                         break;
                     }
                 }
+                printf("\x1b[97m");
                 print_u64_padded(first_cpu, 8);
+                printf("\x1b[0m");
             }
 
-            printf("%s\n", entries[i].name[0] ? entries[i].name : "(unnamed)");
+            if (entries[i].cpu_mask == 0) {
+                printf("\x1b[90m%s\x1b[0m\x1b[K\n", entries[i].name[0] ? entries[i].name : "(unnamed)");
+            } else {
+                printf("%s\x1b[K\n", entries[i].name[0] ? entries[i].name : "(unnamed)");
+            }
         }
 
         if (total > PROCVIEW_MAX) {
             printf("\nprocview: output truncated to ");
             print_u64(PROCVIEW_MAX);
-            printf(" entries\n");
+            printf(" entries\x1b[K\n");
         }
 
         printf("\x1b[J");
@@ -265,6 +277,8 @@ static void print_table_loop() {
 
 void main(int argc, char** argv) {
     stdio_arginit(&argc, argv);
+
+    printf("\x1b]0;lsproc\x07");
 
     int loop_mode = 0;
 

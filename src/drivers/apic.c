@@ -170,7 +170,6 @@ void inc_uptime() {
 
     uint32_t timer_init_val = lapic_regs[TIMER_INIT/4];
     uint64_t ms_per_tick = timer_init_val / lapic_ticks_per_ms;
-    serial_printf("%d\n", ms_per_tick);
 
     __atomic_add_fetch(&system_uptime_ms, ms_per_tick, __ATOMIC_RELAXED);
 }

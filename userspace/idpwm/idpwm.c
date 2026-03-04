@@ -66,34 +66,46 @@ static uint32_t shade(uint32_t color, uint8_t amount) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
 }
 
-static void draw_client(wm_state_t* wm, uint8_t idx) {
-    wm_client_t* c = &wm->clients[idx];
-    uint8_t focused = idx == wm->focused_index;
-    uint32_t border = focused ? palette[1] : palette[2];
-
+static int32_t wm_titlebar_height(void) {
     int32_t padding = 4;
-    int32_t tb_h = (g_title_font.height > 0 ? g_title_font.height : 10) + padding;
+    int32_t title_h = (g_title_font.height > 0 ? g_title_font.height : 10);
+    return title_h + padding;
+}
+
+static void wm_draw_client_frame(wm_state_t* wm, const wm_client_t* c, uint8_t focused) {
+    uint32_t border = focused ? palette[1] : palette[2];
+    int32_t tb_h = wm_titlebar_height();
+
     gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, c->frame.h, palette[0]);
     gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, tb_h, palette[3]);
 
     for (int32_t i = 0; i < IDPWM_BORDER_WIDTH; ++i) {
         gfx_draw_rect(wm->gfx, c->frame.x + i, c->frame.y + i, c->frame.w - (i * 2), c->frame.h - (i * 2), border);
     }
+}
 
+static void wm_draw_client_title(wm_state_t* wm, const wm_client_t* c) {
+    int32_t padding = 4;
     int text_x = c->frame.x + IDPWM_BORDER_WIDTH + 4;
     int text_y = c->frame.y + (padding * 1.5);
+
     if (c->ipc && c->ipc->title[0] != '\0') {
         gfx_draw_string(wm->gfx, &g_title_font, c->ipc->title, text_x, text_y, palette[0]);
     } else {
         gfx_draw_string(wm->gfx, &g_title_font, "Window", text_x, text_y, palette[0]);
     }
+}
 
+static void wm_blit_client_buffer(wm_state_t* wm, wm_client_t* c) {
+    int32_t tb_h = wm_titlebar_height();
     int32_t cx = c->frame.x + IDPWM_BORDER_WIDTH;
     int32_t cy = c->frame.y + tb_h;
     int32_t cw = c->frame.w - (IDPWM_BORDER_WIDTH * 2);
     int32_t ch = c->frame.h - tb_h - IDPWM_BORDER_WIDTH;
 
-    if (cw <= 0 || ch <= 0 || !c->ipc) return;
+    if (cw <= 0 || ch <= 0 || !c->ipc) {
+        return;
+    }
 
     c->ipc->width = (uint32_t)cw;
     c->ipc->height = (uint32_t)ch;
@@ -101,9 +113,18 @@ static void draw_client(wm_state_t* wm, uint8_t idx) {
     for (int32_t y = 0; y < ch; y++) {
         uint32_t* dst_row = &wm->gfx->back_buffer[(cy + y) * wm->gfx->stride_pixels + cx];
         const uint32_t* src_row = &c->ipc->pixels[y * WINDOW_MAX_WIDTH];
-        
+
         gfx_memcpy32(dst_row, src_row, cw);
     }
+}
+
+static void draw_client(wm_state_t* wm, uint8_t idx) {
+    wm_client_t* c = &wm->clients[idx];
+    uint8_t focused = idx == wm->focused_index;
+
+    wm_draw_client_frame(wm, c, focused);
+    wm_draw_client_title(wm, c);
+    wm_blit_client_buffer(wm, c);
 }
 
 static void layout_master_stack(wm_state_t* wm) {
@@ -216,6 +237,7 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
     if ((int64_t)c->shm_handle < 0) {
         return;
     }
+
     c->ipc = (window_ipc_t*)sys_shm_map(c->shm_handle);
     if ((uint64_t)c->ipc == (uint64_t)-1 || c->ipc == NULL) {
         sys_shm_destroy(c->shm_handle);
@@ -223,7 +245,7 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
         c->ipc = NULL;
         return;
     }
-    
+
     c->ipc->width = WINDOW_MAX_WIDTH;
     c->ipc->height = WINDOW_MAX_HEIGHT;
     c->ipc->pitch_bytes = WINDOW_MAX_WIDTH * 4;
@@ -233,16 +255,20 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
     char handle_str[32];
     int i = 0;
     uint64_t temp = c->shm_handle;
-    if (temp == 0) { handle_str[i++] = '0'; }
-    else {
-        while (temp > 0) { handle_str[i++] = (char)((temp % 10) + '0'); temp /= 10; }
+    if (temp == 0) {
+        handle_str[i++] = '0';
+    } else {
+        while (temp > 0) {
+            handle_str[i++] = (char)((temp % 10) + '0');
+            temp /= 10;
+        }
     }
     handle_str[i] = '\0';
 
-    for (int j = 0; j < i / 2; j++) { 
-        char t = handle_str[j]; 
-        handle_str[j] = handle_str[i - j - 1]; 
-        handle_str[i - j - 1] = t; 
+    for (int j = 0; j < i / 2; j++) {
+        char t = handle_str[j];
+        handle_str[j] = handle_str[i - j - 1];
+        handle_str[i - j - 1] = t;
     }
 
     const char* args[] = {"/nvme/bin/idpterm.elf", handle_str, NULL};
@@ -312,6 +338,64 @@ static void wm_swap_focus_with_master(wm_state_t* wm) {
     wm->focused_index = 0;
 }
 
+static void wm_forward_key_to_focused_client(wm_state_t* wm, const key_event_t* ev) {
+    if (wm->client_count == 0) {
+        return;
+    }
+
+    wm_client_t* focused = &wm->clients[wm->focused_index];
+    if (!focused->ipc) {
+        return;
+    }
+
+    uint8_t next_head = (uint8_t)((focused->ipc->key_head + 1) % IPC_MAX_KEY_EVENTS);
+    if (next_head != focused->ipc->key_tail) {
+        focused->ipc->key_ring[focused->ipc->key_head] = *ev;
+        focused->ipc->key_head = next_head;
+    }
+}
+
+static void wm_handle_alt_key(wm_state_t* wm, const key_event_t* ev, uint8_t shift) {
+    if (ev->code == KEY_ESC) {
+        wm->running = 0;
+        return;
+    }
+
+    if (shift && ev->code == KEY_ENTER) {
+        wm->dirty = 1;
+        wm_swap_focus_with_master(wm);
+    } else if (ev->code == KEY_ENTER) {
+        wm->dirty = 1;
+        wm_spawn_terminal_client(wm);
+    } else if (ev->code == KEY_Q) {
+        wm->dirty = 1;
+        wm_close_focused(wm);
+    } else if (ev->code == KEY_SPACE) {
+        wm->dirty = 1;
+        wm->layout = (wm->layout == LAYOUT_MASTER_STACK) ? LAYOUT_MONOCLE : LAYOUT_MASTER_STACK;
+    } else if (ev->code == KEY_TAB || ev->code == KEY_J || ev->code == KEY_L) {
+        wm->dirty = 1;
+        if (shift) wm_focus_prev(wm);
+        else wm_focus_next(wm);
+    } else if (ev->code == KEY_K || ev->code == KEY_H) {
+        wm->dirty = 1;
+        if (shift) wm_focus_next(wm);
+        else wm_focus_prev(wm);
+    } else if (ev->code == KEY_MINUS) {
+        wm->dirty = 1;
+        if (wm->master_ratio_percent > 35) wm->master_ratio_percent -= 5;
+    } else if (ev->code == KEY_EQUAL) {
+        wm->dirty = 1;
+        if (wm->master_ratio_percent < 75) wm->master_ratio_percent += 5;
+    } else if (ev->code >= KEY_1 && ev->code <= KEY_8) {
+        wm->dirty = 1;
+        uint8_t target = (uint8_t)(ev->code - KEY_1);
+        if (target < wm->client_count) {
+            wm->focused_index = target;
+        }
+    }
+}
+
 static void wm_handle_key(wm_state_t* wm, const key_event_t* ev) {
     if (!ev->is_pressed) {
         return;
@@ -321,56 +405,35 @@ static void wm_handle_key(wm_state_t* wm, const key_event_t* ev) {
     uint8_t shift = (ev->status_mask & SHIFT_MASK) != 0;
 
     if (alt) {
-        if (ev->code == KEY_ESC) {
-            wm->running = 0;
-            return;
-        }
-    
-        if (shift && ev->code == KEY_ENTER) {
-            wm->dirty = 1;
-            wm_swap_focus_with_master(wm);
-        } else if (ev->code == KEY_ENTER) {
-            wm->dirty = 1;
-            wm_spawn_terminal_client(wm);
-        } else if (ev->code == KEY_Q) {
-            wm->dirty = 1;
-            wm_close_focused(wm);
-        } else if (ev->code == KEY_SPACE) {
-            wm->dirty = 1;
-            wm->layout = (wm->layout == LAYOUT_MASTER_STACK) ? LAYOUT_MONOCLE : LAYOUT_MASTER_STACK;
-        } else if (ev->code == KEY_TAB || ev->code == KEY_J || ev->code == KEY_L) {
-            wm->dirty = 1;
-            if (shift) wm_focus_prev(wm);
-            else wm_focus_next(wm);
-        } else if (ev->code == KEY_K || ev->code == KEY_H) {
-            wm->dirty = 1;
-            if (shift) wm_focus_next(wm);
-            else wm_focus_prev(wm);
-        } else if (ev->code == KEY_MINUS) {
-            wm->dirty = 1;
-            if (wm->master_ratio_percent > 35) wm->master_ratio_percent -= 5;
-        } else if (ev->code == KEY_EQUAL) {
-            wm->dirty = 1;
-            if (wm->master_ratio_percent < 75) wm->master_ratio_percent += 5;
-        } else if (ev->code >= KEY_1 && ev->code <= KEY_8) {
-            wm->dirty = 1;
-            uint8_t target = (uint8_t)(ev->code - KEY_1);
-            if (target < wm->client_count) {
-                wm->focused_index = target;
-            }
-        }
+        wm_handle_alt_key(wm, ev, shift);
     } else {
-        if (wm->client_count > 0) {
-            wm_client_t* focused = &wm->clients[wm->focused_index];
-            if (focused->ipc) {
-                uint8_t next_head = (uint8_t)((focused->ipc->key_head + 1) % IPC_MAX_KEY_EVENTS);
-                if (next_head != focused->ipc->key_tail) {
-                    focused->ipc->key_ring[focused->ipc->key_head] = *ev;
-                    focused->ipc->key_head = next_head;
-                }
-            }
+        wm_forward_key_to_focused_client(wm, ev);
+    }
+}
+
+static void wm_mark_focused_client(wm_state_t* wm) {
+    for (uint8_t i = 0; i < wm->client_count; ++i) {
+        if (wm->clients[i].ipc) {
+            wm->clients[i].ipc->focused = (i == wm->focused_index);
         }
     }
+}
+
+static void wm_render_dirty_clients(wm_state_t* wm) {
+    uint8_t presented = 0;
+
+    for (uint8_t i = 0; i < wm->client_count; ++i) {
+        if (wm->clients[i].ipc && wm->clients[i].ipc->dirty) {
+            draw_client(wm, i);
+            wm->clients[i].ipc->dirty = 0;
+            presented = 1;
+        }
+    }
+
+    if (presented) {
+        gfx_present(wm->gfx);
+    }
+
 }
 
 
@@ -406,28 +469,13 @@ void main() {
 
         int needs_full_arrange = wm.dirty;
         wm.dirty = 0;
-        int presented = 0;
 
         if (needs_full_arrange) {
-            for (uint8_t i = 0; i < wm.client_count; ++i) {
-                if (wm.clients[i].ipc) {
-                    wm.clients[i].ipc->focused = (i == wm.focused_index);
-                }
-            }
+            wm_mark_focused_client(&wm);
             wm_arrange(&wm);
             wm_render(&wm);
-            presented = 1;
         } else {
-            for (uint8_t i = 0; i < wm.client_count; ++i) {
-                if (wm.clients[i].ipc && wm.clients[i].ipc->dirty) {
-                    draw_client(&wm, i); 
-                    wm.clients[i].ipc->dirty = 0;
-                    presented = 1;
-                }
-            }
-            if (presented) {
-                gfx_present(wm.gfx);
-            }
+            wm_render_dirty_clients(&wm);
         }
         
         sys_yield();

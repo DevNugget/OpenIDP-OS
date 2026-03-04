@@ -5,6 +5,7 @@
 #include <memory/vmm.h>
 #include <utility/kstring.h>
 #include <utility/spinlock.h>
+#include <multitasking/scheduler.h>
 
 #define SHM_FLAG_DESTROYED (1ULL << 0)
 #define SHM_FLAG_OWNS_PAGES (1ULL << 1)
@@ -20,6 +21,7 @@ typedef struct shm_segment_t {
     phys_addr_t* pages;
     size_t ref_count;
     uint64_t flags;
+    size_t creator_pid;
     struct shm_segment_t* next;
 } shm_segment_t;
 
@@ -127,6 +129,7 @@ static int create_segment_internal(phys_addr_t phys_base,
     uint64_t flags = spinlock_lock_irqsave(&shm_lock);
     segment->handle = next_shm_handle++;
     segment->page_count = page_count;
+    segment->creator_pid = scheduler_current_pid();
     segment->next = shm_segments;
     shm_segments = segment;
     spinlock_unlock_irqrestore(&shm_lock, flags);
@@ -260,6 +263,14 @@ void shm_release_process_mappings(process_t* process) {
 
     uint64_t flags = spinlock_lock_irqsave(&shm_lock);
 
+    shm_segment_t* seg_iter = shm_segments;
+    while (seg_iter != NULL) {
+        if (seg_iter->creator_pid == process->pid) {
+            seg_iter->flags |= SHM_FLAG_DESTROYED;
+        }
+        seg_iter = seg_iter->next;
+    }
+
     shm_mapping_t* mapping = process->shm_mappings;
     process->shm_mappings = NULL;
 
@@ -278,6 +289,17 @@ void shm_release_process_mappings(process_t* process) {
 
         kfree(mapping);
         mapping = next;
+    }
+
+    shm_segment_t** curr = &shm_segments;
+    while (*curr != NULL) {
+        shm_segment_t* entry = *curr;
+        if (entry->ref_count == 0 && (entry->flags & SHM_FLAG_DESTROYED) != 0) {
+            *curr = entry->next;
+            release_segment_pages(entry);
+        } else {
+            curr = &entry->next;
+        }
     }
 
     spinlock_unlock_irqrestore(&shm_lock, flags);

@@ -3,7 +3,7 @@ APP := idpimg
 CC ?= cc
 CFLAGS := -g -O2 -Wall -Wextra -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -I.. -mno-sse -mno-avx
 LDFLAGS := -nostdlib -static -no-pie -T linker.ld
-SRC := idpimg.c ../libgfx/gfx.c ../libidp/stdio.c
+SRC := idpimg.c ../libgfx/gfx.c ../libidp/stdio.c ../libidp/window_client.c
 OBJ := $(SRC:.c=.o)
 all: $(APP).elf
 $(APP).elf: $(OBJ) linker.ld

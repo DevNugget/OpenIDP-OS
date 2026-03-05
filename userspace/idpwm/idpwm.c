@@ -42,6 +42,8 @@ typedef struct {
     uint8_t dirty;
     uint64_t control_shm_handle;
     wm_control_ipc_t* control_ipc;
+    gfx_image_t wallpaper;
+    bool has_wallpaper;
 } wm_state_t;
 
 gfx_font_t g_title_font;
@@ -193,8 +195,30 @@ static void wm_arrange(wm_state_t* wm) {
     }
 }
 
+static void wm_draw_wallpaper_fill(wm_state_t* wm) {
+    if (!wm->has_wallpaper || wm->wallpaper.width == 0 || wm->wallpaper.height == 0) {
+        return;
+    }
+
+    uint32_t view_w = wm->gfx->width;
+    uint32_t view_h = wm->gfx->height;
+
+    for (uint32_t y = 0; y < view_h; ++y) {
+        uint32_t src_y = (uint32_t)(((uint64_t)y * wm->wallpaper.height) / view_h);
+        for (uint32_t x = 0; x < view_w; ++x) {
+            uint32_t src_x = (uint32_t)(((uint64_t)x * wm->wallpaper.width) / view_w);
+            uint32_t color = wm->wallpaper.pixels[(uint64_t)src_y * wm->wallpaper.width + src_x];
+            gfx_put_pixel(wm->gfx, (int32_t)x, (int32_t)y, color);
+        }
+    }
+}
+
 static void wm_render(wm_state_t* wm) {
-    gfx_clear(wm->gfx, gfx_rgb(15, 18, 27));
+    if (wm->has_wallpaper) {
+        wm_draw_wallpaper_fill(wm);
+    } else {
+        gfx_clear(wm->gfx, gfx_rgb(15, 18, 27));
+    }
 
     gfx_fill_rect(wm->gfx, 0, 0, (int32_t)wm->gfx->width, 22, gfx_rgb(24, 30, 44));
     gfx_draw_line(wm->gfx, 0, 22, (int32_t)wm->gfx->width - 1, 22, gfx_rgb(66, 86, 120));
@@ -402,6 +426,10 @@ static void wm_shutdown(wm_state_t* wm) {
         wm_close_focused(wm);
     }
 
+    if (wm->has_wallpaper) {
+        gfx_unload_image(&wm->wallpaper);
+    }
+
     if (wm->control_ipc != NULL) {
         sys_shm_unmap(wm->control_ipc);
         wm->control_ipc = NULL;
@@ -540,11 +568,16 @@ void main() {
     wm.master_ratio_percent = 50;
     wm.running = 1;
 
+    if (gfx_load_image("/nvme/images/wallpaper.idpimg", &wm.wallpaper) == ERR_SUCCESS) {
+        wm.has_wallpaper = true;
+    } else {
+        wm.has_wallpaper = false;
+        sys_print("[IDPWM] No wallpaper found, using solid color.\n");
+    }
+
     if (wm_init_control_channel(&wm) != 0) {
         sys_print("[IDPWM] Failed to initialize WM control IPC\n");
     }
-
-    wm_spawn_terminal_client(&wm);
 
     wm.dirty = 1;
 

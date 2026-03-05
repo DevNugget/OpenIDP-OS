@@ -29,6 +29,13 @@ typedef struct gfx_font_t {
     uint32_t height;
 } gfx_font_t;
 
+typedef struct gfx_image_t {
+    uint32_t width;
+    uint32_t height;
+    uint32_t* pixels;
+    uint64_t shm_handle;
+} gfx_image_t;
+
 inline void gfx_memset32(uint32_t* dst, uint32_t value, uint64_t count) {
     __asm__ volatile (
         "rep stosl"
@@ -62,6 +69,10 @@ int gfx_load_font(const char* path, gfx_font_t* out_font);
 void gfx_unload_font(gfx_font_t* font);
 void gfx_draw_char(gfx_context_t* ctx, const gfx_font_t* font, char c, int32_t x, int32_t y, uint32_t color);
 void gfx_draw_string(gfx_context_t* ctx, const gfx_font_t* font, const char* str, int32_t x, int32_t y, uint32_t color);
+
+int gfx_load_image(const char* path, gfx_image_t* out_image);
+void gfx_unload_image(gfx_image_t* image);
+void gfx_draw_image(gfx_context_t* ctx, const gfx_image_t* image, int32_t x, int32_t y);
 
 static inline uint32_t gfx_rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;

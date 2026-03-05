@@ -1,4 +1,5 @@
 #include "gfx.h"
+#include "idpimg.h"
 
 static void gfx_memcpy8(uint8_t* dst, const uint8_t* src, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
@@ -321,5 +322,85 @@ void gfx_draw_string(gfx_context_t* ctx, const gfx_font_t* font, const char* str
         gfx_draw_char(ctx, font, *str, x, y, color);
         x += font->width;
         str++;
+    }
+}
+
+int gfx_load_image(const char* path, gfx_image_t* out_image) {
+    if (!path || !out_image) return ERR_FAIL;
+
+    uint64_t fd = sys_open(path, IDP_O_RDONLY);
+    if (fd == (uint64_t)ERR_FAIL) return ERR_FAIL;
+
+    idpimg_header_t hdr;
+    uint64_t rd = 0;
+    
+    if (sys_read(fd, &hdr, sizeof(idpimg_header_t), &rd) != ERR_SUCCESS || rd != sizeof(idpimg_header_t)) {
+        sys_close(fd);
+        return ERR_FAIL;
+    }
+
+    if (hdr.magic != IDPIMG_MAGIC) {
+        sys_close(fd);
+        return ERR_FAIL;
+    }
+
+    uint64_t img_size = (uint64_t)hdr.width * (uint64_t)hdr.height * sizeof(uint32_t);
+    uint64_t shm = sys_shm_create(img_size);
+    if ((int64_t)shm < 0) {
+        sys_close(fd);
+        return ERR_FAIL;
+    }
+
+    uint32_t* pixels = (uint32_t*)sys_shm_map(shm);
+    if ((uint64_t)pixels == (uint64_t)-1 || pixels == NULL) {
+        sys_shm_destroy(shm);
+        sys_close(fd);
+        return ERR_FAIL;
+    }
+
+    size_t offset = 0;
+    while (offset < img_size) {
+        uint64_t chunk_rd = 0;
+        if (sys_read(fd, (uint8_t*)pixels + offset, img_size - offset, &chunk_rd) != ERR_SUCCESS) {
+            sys_shm_unmap(pixels);
+            sys_shm_destroy(shm);
+            sys_close(fd);
+            return ERR_FAIL;
+        }
+        if (chunk_rd == 0) break;
+        offset += (size_t)chunk_rd;
+    }
+    sys_close(fd);
+
+    out_image->width = hdr.width;
+    out_image->height = hdr.height;
+    out_image->pixels = pixels;
+    out_image->shm_handle = shm;
+
+    return ERR_SUCCESS;
+}
+
+void gfx_unload_image(gfx_image_t* image) {
+    if (!image || !image->pixels) return;
+    sys_shm_unmap(image->pixels);
+    sys_shm_destroy(image->shm_handle);
+    image->pixels = NULL;
+    image->shm_handle = 0;
+}
+
+void gfx_draw_image(gfx_context_t* ctx, const gfx_image_t* image, int32_t x, int32_t y) {
+    if (!ctx || !ctx->back_buffer || !image || !image->pixels) return;
+
+    for (uint32_t iy = 0; iy < image->height; iy++) {
+        int32_t py = y + iy;
+        if (py < 0 || (uint64_t)py >= ctx->height) continue;
+
+        for (uint32_t ix = 0; ix < image->width; ix++) {
+            int32_t px = x + ix;
+            if (px < 0 || (uint64_t)px >= ctx->width) continue;
+
+            uint32_t color = image->pixels[iy * image->width + ix];
+            ctx->back_buffer[(uint64_t)py * ctx->stride_pixels + (uint64_t)px] = color;
+        }
     }
 }

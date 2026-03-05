@@ -8,7 +8,7 @@
 #include <utility/hhdm.h>
 
 #define PROC_NAME_LEN 64
-#define PROCESS_MAX_FDS 32
+#define PROCESS_MAX_FDS 64
 
 typedef enum {
     THREAD_READY,

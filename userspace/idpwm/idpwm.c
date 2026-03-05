@@ -40,6 +40,8 @@ typedef struct {
     uint8_t running;
     uint8_t master_ratio_percent;
     uint8_t dirty;
+    uint64_t control_shm_handle;
+    wm_control_ipc_t* control_ipc;
 } wm_state_t;
 
 gfx_font_t g_title_font;
@@ -222,8 +224,41 @@ static void wm_focus_prev(wm_state_t* wm) {
     }
 }
 
-static void wm_spawn_terminal_client(wm_state_t* wm) {
-    if (wm->client_count >= IDPWM_MAX_CLIENTS) return;
+static int u64_to_dec(uint64_t value, char* out, int out_len) {
+    if (!out || out_len <= 1) {
+        return 0;
+    }
+
+    char tmp[32];
+    int n = 0;
+
+    if (value == 0) {
+        if (out_len < 2) {
+            return 0;
+        }
+        out[0] = '0';
+        out[1] = '\0';
+        return 1;
+    }
+
+    while (value > 0 && n < (int)sizeof(tmp)) {
+        tmp[n++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+
+    if (n >= out_len) {
+        n = out_len - 1;
+    }
+
+    for (int i = 0; i < n; ++i) {
+        out[i] = tmp[n - i - 1];
+    }
+    out[n] = '\0';
+    return n;
+}
+
+static void wm_spawn_client(wm_state_t* wm, const char* executable, const char* app_arg) {
+    if (wm->client_count >= IDPWM_MAX_CLIENTS || !executable || executable[0] == '\0') return;
 
     uint8_t idx = wm->client_count;
     wm_client_t* c = &wm->clients[idx];
@@ -253,26 +288,13 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
     c->ipc->key_tail = 0;
 
     char handle_str[32];
-    int i = 0;
-    uint64_t temp = c->shm_handle;
-    if (temp == 0) {
-        handle_str[i++] = '0';
-    } else {
-        while (temp > 0) {
-            handle_str[i++] = (char)((temp % 10) + '0');
-            temp /= 10;
-        }
-    }
-    handle_str[i] = '\0';
+    u64_to_dec(c->shm_handle, handle_str, sizeof(handle_str));
 
-    for (int j = 0; j < i / 2; j++) {
-        char t = handle_str[j];
-        handle_str[j] = handle_str[i - j - 1];
-        handle_str[i - j - 1] = t;
-    }
+    const char* args_with_param[] = {executable, handle_str, app_arg, NULL};
+    const char* args_no_param[] = {executable, handle_str, NULL};
+    const char** spawn_argv = (app_arg && app_arg[0] != '\0') ? args_with_param : args_no_param;
 
-    const char* args[] = {"/nvme/bin/idpterm.elf", handle_str, NULL};
-    c->pid = sys_spawn(args[0], args);
+    c->pid = sys_spawn(executable, spawn_argv);
     if (c->pid < 0) {
         sys_shm_unmap(c->ipc);
         sys_shm_destroy(c->shm_handle);
@@ -284,6 +306,60 @@ static void wm_spawn_terminal_client(wm_state_t* wm) {
     wm->client_count++;
     wm->focused_index = idx;
     wm->dirty = 1;
+}
+
+static void wm_spawn_terminal_client(wm_state_t* wm) {
+    wm_spawn_client(wm, "/nvme/bin/idpterm.elf", NULL);
+}
+
+static int wm_init_control_channel(wm_state_t* wm) {
+    wm->control_shm_handle = (uint64_t)sys_shm_create(sizeof(wm_control_ipc_t));
+    if ((int64_t)wm->control_shm_handle < 0) {
+        wm->control_shm_handle = 0;
+        return -1;
+    }
+
+    wm->control_ipc = (wm_control_ipc_t*)sys_shm_map(wm->control_shm_handle);
+    if ((uint64_t)wm->control_ipc == (uint64_t)-1 || wm->control_ipc == NULL) {
+        sys_shm_destroy(wm->control_shm_handle);
+        wm->control_shm_handle = 0;
+        wm->control_ipc = NULL;
+        return -1;
+    }
+
+    wm->control_ipc->magic = WM_CONTROL_MAGIC;
+    wm->control_ipc->version = 1;
+    wm->control_ipc->request_head = 0;
+    wm->control_ipc->request_tail = 0;
+
+    for (uint8_t i = 0; i < WM_MAX_REQUESTS; ++i) {
+        wm->control_ipc->requests[i].pending = 0;
+        wm->control_ipc->requests[i].executable[0] = '\0';
+        wm->control_ipc->requests[i].argument[0] = '\0';
+    }
+
+    return 0;
+}
+
+static void wm_process_control_requests(wm_state_t* wm) {
+    if (!wm->control_ipc || wm->control_ipc->magic != WM_CONTROL_MAGIC) {
+        return;
+    }
+
+    while (wm->control_ipc->request_tail != wm->control_ipc->request_head) {
+        uint8_t idx = wm->control_ipc->request_tail;
+        wm_spawn_request_t* req = &wm->control_ipc->requests[idx];
+
+        if (req->pending && req->executable[0] != '\0') {
+            wm_spawn_client(wm, req->executable, req->argument);
+            wm->dirty = 1;
+        }
+
+        req->pending = 0;
+        req->executable[0] = '\0';
+        req->argument[0] = '\0';
+        wm->control_ipc->request_tail = (uint8_t)((wm->control_ipc->request_tail + 1) % WM_MAX_REQUESTS);
+    }
 }
 
 static void wm_close_focused(wm_state_t* wm) {
@@ -324,6 +400,15 @@ static void wm_shutdown(wm_state_t* wm) {
     while (wm->client_count > 0) {
         wm->focused_index = 0;
         wm_close_focused(wm);
+    }
+
+    if (wm->control_ipc != NULL) {
+        sys_shm_unmap(wm->control_ipc);
+        wm->control_ipc = NULL;
+    }
+    if (wm->control_shm_handle != 0) {
+        sys_shm_destroy(wm->control_shm_handle);
+        wm->control_shm_handle = 0;
     }
 }
 
@@ -455,6 +540,10 @@ void main() {
     wm.master_ratio_percent = 50;
     wm.running = 1;
 
+    if (wm_init_control_channel(&wm) != 0) {
+        sys_print("[IDPWM] Failed to initialize WM control IPC\n");
+    }
+
     wm_spawn_terminal_client(&wm);
 
     wm.dirty = 1;
@@ -466,6 +555,8 @@ void main() {
                 wm_handle_key(&wm, &ev);
             }
         }
+
+        wm_process_control_requests(&wm);
 
         int needs_full_arrange = wm.dirty;
         wm.dirty = 0;

@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 #define VFS_MAX_MOUNTS 8
-#define VFS_MAX_OPEN_FILES 32
+#define VFS_MAX_OPEN_FILES 64
 
 typedef enum {
     VFS_OK = 0,

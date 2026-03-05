@@ -133,7 +133,8 @@ void kmain(void) {
     
     char wm_argv[16][64] = {{"/nvme/bin/idpwm.elf"}};
     create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf", 1, wm_argv);
-    //create_user_process_from_path("lscpu", "/nvme/bin/lscpu.elf");
+    //char shell_argv[16][64] = {{"/nvme/bin/idpshell.elf"}};
+    //create_user_process_from_path("idpshell", "/nvme/bin/idpshell.elf", 1, shell_argv);
     
     apic_timer_start(500);
     asm volatile ("sti");

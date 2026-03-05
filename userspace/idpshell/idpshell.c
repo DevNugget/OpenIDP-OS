@@ -26,6 +26,22 @@ static int str_has_char(const char* s, char c) {
     return 0;
 }
 
+static int str_ends_with(const char* str, const char* suffix) {
+    size_t str_len_v = str_len(str);
+    size_t suffix_len = str_len(suffix);
+
+    if (suffix_len > str_len_v) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < suffix_len; ++i) {
+        if (str[str_len_v - suffix_len + i] != suffix[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int copy_str(char* dst, size_t cap, const char* src) {
     if (cap == 0) {
         return -1;
@@ -41,6 +57,11 @@ static int copy_str(char* dst, size_t cap, const char* src) {
     }
     dst[i] = '\0';
     return 0;
+}
+
+static int append_str(char* dst, size_t cap, const char* suffix) {
+    size_t l = str_len(dst);
+    return copy_str(dst + l, cap - l, suffix);
 }
 
 static int normalize_path(char* out, size_t cap, const char* cwd, const char* path) {
@@ -185,6 +206,7 @@ void main(int argc, char** argv) {
     char cwd[MAX_PATH] = "/";
     char resolved_path[MAX_PATH];
     char bin_path[MAX_PATH];
+    char elf_path[MAX_PATH];
 
     int last_err_code = 0;
 
@@ -254,10 +276,19 @@ void main(int argc, char** argv) {
             }
 
             int has_bin_fallback = 0;
+            int has_elf_fallback = 0;
             if (copy_str(bin_path, sizeof(bin_path), "/nvme/bin/") == 0) {
                 size_t bin_len = str_len(bin_path);
                 if (copy_str(bin_path + bin_len, sizeof(bin_path) - bin_len, token_argv[0]) == 0) {
                     has_bin_fallback = 1;
+                }
+            }
+
+            if (!str_ends_with(token_argv[0], ".elf") && copy_str(elf_path, sizeof(elf_path), "/nvme/bin/") == 0) {
+                size_t elf_len = str_len(elf_path);
+                if (copy_str(elf_path + elf_len, sizeof(elf_path) - elf_len, token_argv[0]) == 0 &&
+                    append_str(elf_path, sizeof(elf_path), ".elf") == 0) {
+                    has_elf_fallback = 1;
                 }
             }
 
@@ -271,6 +302,9 @@ void main(int argc, char** argv) {
             int pid = sys_spawn(resolved_path, (const char**)token_argv);
             if (pid < 0 && has_bin_fallback && !str_has_char(token_argv[0], '/')) {
                 pid = sys_spawn(bin_path, (const char**)token_argv);
+            }
+            if (pid < 0 && has_elf_fallback && !str_has_char(token_argv[0], '/')) {
+                pid = sys_spawn(elf_path, (const char**)token_argv);
             }
             if (pid < 0) {
                 printf("idpshell: command not found: %s\n", token_argv[0]);

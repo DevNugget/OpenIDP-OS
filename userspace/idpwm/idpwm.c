@@ -49,7 +49,7 @@ static uint32_t palette[] = {
     0xb4befe, // lavender
     0x6c7086, // overlay 0
     0x45475a, // surface 2
-    0x2A9D8F, 0xE76F51, 0x457B9D, 0xF4A261,
+    0x11111b, 0x9399b2, 0x457B9D, 0xF4A261,
     0x8D99AE, 0xB56576, 0x5E60CE, 0x6A994E
 };
 
@@ -67,7 +67,7 @@ static uint32_t shade(uint32_t color, uint8_t amount) {
 }
 
 static int32_t wm_titlebar_height(void) {
-    int32_t padding = 4;
+    int32_t padding = 6;
     int32_t title_h = (g_title_font.height > 0 ? g_title_font.height : 10);
     return title_h + padding;
 }
@@ -77,7 +77,7 @@ static void wm_draw_client_frame(wm_state_t* wm, const wm_client_t* c, uint8_t f
     int32_t tb_h = wm_titlebar_height();
 
     gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, c->frame.h, palette[0]);
-    gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, tb_h, palette[3]);
+    gfx_fill_rect(wm->gfx, c->frame.x, c->frame.y, c->frame.w, tb_h, palette[4]);
 
     for (int32_t i = 0; i < IDPWM_BORDER_WIDTH; ++i) {
         gfx_draw_rect(wm->gfx, c->frame.x + i, c->frame.y + i, c->frame.w - (i * 2), c->frame.h - (i * 2), border);
@@ -90,9 +90,9 @@ static void wm_draw_client_title(wm_state_t* wm, const wm_client_t* c) {
     int text_y = c->frame.y + (padding * 1.5);
 
     if (c->ipc && c->ipc->title[0] != '\0') {
-        gfx_draw_string(wm->gfx, &g_title_font, c->ipc->title, text_x, text_y, palette[0]);
+        gfx_draw_string(wm->gfx, &g_title_font, c->ipc->title, text_x, text_y, palette[5]);
     } else {
-        gfx_draw_string(wm->gfx, &g_title_font, "Window", text_x, text_y, palette[0]);
+        gfx_draw_string(wm->gfx, &g_title_font, "Window", text_x, text_y, palette[5]);
     }
 }
 
@@ -446,7 +446,7 @@ void main() {
         sys_exit(1);
     }
 
-    if (gfx_load_font("/nvme/fonts/kryptonbold.psf", &g_title_font) != 0) {
+    if (gfx_load_font("/nvme/fonts/krypton.psf", &g_title_font) != 0) {
         sys_print("[IDPWM] Failed to load window title font\n");
     }
 

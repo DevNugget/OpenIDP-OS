@@ -1,5 +1,6 @@
 #include <libidp/syscall.h>
 #include <libidp/stdio.h>
+#include <libidp/ansi.h>
 #include <stddef.h>
 
 #define MAX_LINE 256
@@ -194,12 +195,21 @@ void main(int argc, char** argv) {
     int last_err_code = 0;
 
     while (1) {
-        printf("\x1b]0;idpshell\x07");
+        printf(ANSI_SET_TITLE("idpshell"));
         if (last_err_code != 0) {
-            printf("\x1b[31merr\x1b[90m(\x1b[37m%d\x1b[90m) :: \x1b[35m@\x1b[90m[\x1b[34m%s\x1b[90m] :: \x1b[0m", last_err_code, cwd);
+            printf(
+                ANSI_FG_RED "err" ANSI_FG_BRIGHT_BLACK "(" ANSI_FG_WHITE "%d" ANSI_FG_BRIGHT_BLACK 
+                ") :: " ANSI_FG_MAGENTA "@" ANSI_FG_BRIGHT_BLACK "[" ANSI_FG_BLUE "%s" 
+                ANSI_FG_BRIGHT_BLACK "] :: " ANSI_RESET, last_err_code, cwd
+            );
         } else {
-            printf("\x1b[32merr\x1b[90m(\x1b[37m%d\x1b[90m) :: \x1b[35m@\x1b[90m[\x1b[34m%s\x1b[90m] :: \x1b[0m", last_err_code, cwd);
+            printf(
+                ANSI_FG_GREEN "err" ANSI_FG_BRIGHT_BLACK "(" ANSI_FG_WHITE "%d" ANSI_FG_BRIGHT_BLACK 
+                ") :: " ANSI_FG_MAGENTA "@" ANSI_FG_BRIGHT_BLACK "[" ANSI_FG_BLUE "%s" 
+                ANSI_FG_BRIGHT_BLACK "] :: " ANSI_RESET, last_err_code, cwd
+            );
         }
+
         read_line(line, sizeof(line));
         
         int token_argc = tokenize(line, token_argv, MAX_TOKENS);
@@ -218,7 +228,7 @@ void main(int argc, char** argv) {
             }
             putchar('\n');
         } else if (streq(token_argv[0], "clear")) {
-            printf("\x1b[2J\x1b[H"); 
+            printf(ANSI_CLEAR_SCREEN ANSI_CURSOR_HOME);
         } else if (streq(token_argv[0], "exit")) {
             sys_exit(0);
         } else {

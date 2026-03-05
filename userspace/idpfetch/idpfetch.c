@@ -58,8 +58,6 @@ static void print_info_line(const char* key) {
 }
 
 void main(int argc, char** argv) {
-    stdio_arginit(&argc, argv);
-
     sysinfo_t info;
     framebuffer_user_info_t framebuffer;
 

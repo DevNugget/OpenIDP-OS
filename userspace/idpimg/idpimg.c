@@ -160,24 +160,21 @@ static void draw_image_fit(gfx_context_t* gfx, const gfx_image_t* image, uint32_
     }
 }
 
-static uint64_t hex_to_u64(const char* str) {
-    uint64_t val = 0;
-    for (int i = 0; str[i] != '\0'; i++) {
-        val *= 16;
-        if (str[i] >= '0' && str[i] <= '9') val += str[i] - '0';
-        else if (str[i] >= 'A' && str[i] <= 'F') val += str[i] - 'A' + 10;
-    }
-    return val;
-}
-
 void main(int argc, char** argv) {
-    stdio_arginit(&argc, argv);
     if (argc < 2) {
         printf("usage: idpimg.elf <path/to/.idpimg>\n");
         sys_exit(1);
     }
 
     if (!starts_with_number(argv[1])) {
+        // BUGFIX 1: Verify the file actually exists BEFORE asking the WM for a window!
+        uint64_t test_fd = sys_open(argv[1], IDP_O_RDONLY);
+        if (test_fd == (uint64_t)ERR_FAIL) {
+            printf("idpimg: cannot open file or file does not exist: %s\n", argv[1]);
+            sys_exit(1);
+        }
+        sys_close(test_fd); // File exists, close it and proceed.
+
         if (request_wm_window(argv[1]) != 0) {
             sys_exit(1);
         }
@@ -191,10 +188,18 @@ void main(int argc, char** argv) {
 
     uint64_t window_handle = parse_u64(argv[1]);
     const char* image_path = argv[2];
+    
+    // BUGFIX 2: Do this *before* assigning any IPC or backbuffer handles to prevent freeing invalid memory on failure
+    gfx_image_t image = {0};
+    if (gfx_load_image(image_path, &image) != ERR_SUCCESS) {
+        printf("idpimg: failed to load image file\n");
+        sys_exit(1); 
+    }
 
     window_ipc_t* ipc = (window_ipc_t*)sys_shm_map(window_handle);
     if ((uint64_t)ipc == (uint64_t)-1 || ipc == NULL) {
         printf("idpimg: failed to map window shared memory\n");
+        gfx_unload_image(&image);
         sys_exit(1);
     }
 
@@ -202,28 +207,27 @@ void main(int argc, char** argv) {
     uint64_t backbuffer_handle = 0;
     if (init_gfx_from_window(ipc, &gfx, &backbuffer_handle) != 0) {
         sys_shm_unmap(ipc);
+        gfx_unload_image(&image);
         sys_exit(1);
     }
 
     set_window_title(ipc, image_path);
-
-    gfx_image_t image = {0};
-    if (gfx_load_image(image_path, &image) != ERR_SUCCESS) {
-        printf("idpimg: failed to load image file\n");
-        sys_shm_unmap(gfx.back_buffer);
-        sys_shm_destroy(backbuffer_handle);
-        sys_shm_unmap(ipc);
-        sys_exit(1);
-    }
 
     uint32_t last_w = 0;
     uint32_t last_h = 0;
     uint8_t running = 1;
 
     while (running) {
-        if (ipc->width != last_w || ipc->height != last_h || ipc->dirty == 0) {
+        // BUGFIX 3: Removed `|| ipc->dirty == 0`. We only want to redraw if the window size actually changed.
+        if (ipc->width != last_w || ipc->height != last_h) {
             last_w = ipc->width;
             last_h = ipc->height;
+
+            gfx.width = last_w;
+            gfx.height = last_h;
+            gfx.pitch_bytes = ipc->pitch_bytes;
+            gfx.stride_pixels = ipc->pitch_bytes / 4;
+
             draw_image_fit(&gfx, &image, last_w, last_h);
             gfx_present(&gfx);
             ipc->dirty = 1;

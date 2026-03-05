@@ -2,8 +2,6 @@
 #include <libidp/syscall.h>
 
 void main(int argc, char** argv) {
-    stdio_arginit(&argc, argv);
-
     if (argc < 2) {
         printf("usage: cat <filename>\n");
         sys_exit(1);

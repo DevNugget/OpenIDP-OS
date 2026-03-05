@@ -4,6 +4,10 @@
 static uint64_t g_stdin = 0;
 static uint64_t g_stdout = 0;
 
+#define STDIN_FD  0
+#define STDOUT_FD 1
+#define STDERR_FD 2
+
 static uint64_t hex_to_u64(const char* str) {
     uint64_t val = 0;
     if (!str) return 0;
@@ -16,26 +20,10 @@ static uint64_t hex_to_u64(const char* str) {
     return val;
 }
 
-void stdio_init(uint64_t stdin_fd, uint64_t stdout_fd) {
-    g_stdin = stdin_fd;
-    g_stdout = stdout_fd;
-}
-
-void stdio_arginit(int* argc, char** argv) {
-    if (*argc < 3) return; 
-
-    uint64_t stdin_fd = hex_to_u64(argv[*argc - 2]);
-    uint64_t stdout_fd = hex_to_u64(argv[*argc - 1]);
-    stdio_init(stdin_fd, stdout_fd);
-
-    *argc -= 2;
-    argv[*argc] = NULL; 
-}
-
 int putchar(int c) {
     uint64_t wr = 0;
     char ch = (char)c;
-    sys_write(g_stdout, &ch, 1, &wr); 
+    sys_write(STDOUT_FD, &ch, 1, &wr);
     return c;
 }
 
@@ -43,7 +31,9 @@ int getchar(void) {
     char ch;
     uint64_t rd = 0;
     while (rd == 0) {
-        sys_read(g_stdin, &ch, 1, &rd);
+        if (sys_read(STDIN_FD, &ch, 1, &rd) != 0) { 
+            return -1; 
+        }
         if (rd == 0) sys_yield();
     }
     return (int)ch;

@@ -371,11 +371,11 @@ static int start_shell_process(uint64_t* shell_in_r, uint64_t* shell_in_w, uint6
         return -1;
     }
 
-    char arg_in[20], arg_out[20];
-    u64_to_hex(*shell_in_r, arg_in);
-    u64_to_hex(*shell_out_w, arg_out);
+    sys_dup2(*shell_in_r, 0);   
+    sys_dup2(*shell_out_w, 1);
+    sys_dup2(*shell_out_w, 2);
 
-    const char* shell_args[] = {"/nvme/bin/idpshell.elf", arg_in, arg_out, NULL};
+    const char* shell_args[] = {"/nvme/bin/idpshell.elf", NULL};
     int shell_pid = sys_spawn(shell_args[0], shell_args);
     if (shell_pid < 0) {
         sys_close(*shell_in_r);

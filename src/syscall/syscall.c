@@ -14,7 +14,7 @@
 #define ERR_FAIL -1
 
 static int alloc_fd(process_t* proc, vfs_file_t* file) {
-    for (int i = 0; i < PROCESS_MAX_FDS; i++) {
+    for (int i = 3; i < PROCESS_MAX_FDS; i++) {
         if (proc->fd_table[i] == NULL) {
             proc->fd_table[i] = file;
             return i;
@@ -340,6 +340,29 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
 
             size_t total_count = scheduler_copy_process_snapshot((process_snapshot_entry_t*)user_entries, capacity);
             *user_count = (uint64_t)total_count;
+            context->rax = ERR_SUCCESS;
+            break;
+        }
+
+        case SYS_DUP2: {
+            int oldfd = (int)context->rdi;
+            int newfd = (int)context->rsi;
+            
+            process_t* current_process = scheduler_current_thread()->parent;
+            vfs_file_t* file = get_fd(current_process, oldfd);
+
+            if (file == NULL || newfd < 0 || newfd >= PROCESS_MAX_FDS) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            if (current_process->fd_table[newfd] != NULL) {
+                vfs_close(current_process->fd_table[newfd]);
+            }
+
+            current_process->fd_table[newfd] = file;
+            vfs_file_inc_ref(file);
+
             context->rax = ERR_SUCCESS;
             break;
         }

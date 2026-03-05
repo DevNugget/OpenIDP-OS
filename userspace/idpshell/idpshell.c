@@ -180,12 +180,6 @@ static void read_line(char* out, size_t cap) {
 }
 
 void main(int argc, char** argv) {
-    if (argc < 3) sys_exit(1);
-
-    uint64_t stdin_fd = hex_to_u64(argv[1]);
-    uint64_t stdout_fd = hex_to_u64(argv[2]);
-    stdio_init(stdin_fd, stdout_fd);
-
     char line[MAX_LINE];
     char* token_argv[MAX_TOKENS];
     char cwd[MAX_PATH] = "/";
@@ -267,13 +261,11 @@ void main(int argc, char** argv) {
                 }
             }
 
-            if (token_argc + 2 >= MAX_TOKENS) {
+            if (token_argc + 1 >= MAX_TOKENS) {
                 puts("idpshell: too many arguments");
                 continue;
             }
 
-            token_argv[token_argc++] = argv[1];
-            token_argv[token_argc++] = argv[2];
             token_argv[token_argc] = NULL;
 
             int pid = sys_spawn(resolved_path, (const char**)token_argv);

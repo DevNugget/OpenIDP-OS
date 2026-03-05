@@ -28,6 +28,7 @@
 #define SYS_FS_WRITE 20
 #define SYS_SYSINFO 21
 #define SYS_PROC_LIST 22
+#define SYS_DUP2 23
 
 typedef struct syscall_key_event_t {
     uint8_t code;

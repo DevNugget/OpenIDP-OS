@@ -27,6 +27,7 @@
 #define SYS_FS_WRITE 20
 #define SYS_SYSINFO 21
 #define SYS_PROC_LIST 22
+#define SYS_DUP2 23
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
@@ -283,6 +284,10 @@ static inline int sys_info(sysinfo_t* info) {
 
 static inline int sys_proc_list(process_user_info_t* out_entries, uint64_t capacity, uint64_t* out_count) {
     return (int)syscall_3(SYS_PROC_LIST, (uint64_t)out_entries, capacity, (uint64_t)out_count);
+}
+
+static inline int sys_dup2(uint64_t oldfd, uint64_t newfd) {
+    return (int)syscall_2(SYS_DUP2, oldfd, newfd);
 }
 
 #endif

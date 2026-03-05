@@ -276,8 +276,6 @@ static void print_table_loop() {
 }
 
 void main(int argc, char** argv) {
-    stdio_arginit(&argc, argv);
-
     printf("\x1b]0;lsproc\x07");
 
     int loop_mode = 0;

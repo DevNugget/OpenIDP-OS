@@ -36,6 +36,8 @@ typedef struct {
     uint8_t fg;
     uint8_t bg;
     uint8_t cursor_visible;
+    uint8_t wm_active;
+    int wm_pid;
 } term_t;
 
 typedef struct {
@@ -50,6 +52,13 @@ typedef struct {
 } ansi_parser_t;
 
 static uint8_t g_font_storage[FONT_MAX_BYTES];
+
+typedef enum {
+    TERM_MODE_WINDOWED = 0,
+    TERM_MODE_BOOT = 1,
+} term_mode_t;
+
+static term_mode_t mode;
 
 static uint32_t palette[16] = {
     0x181825, // 0: Black
@@ -303,6 +312,10 @@ static int init_gfx_from_ipc(window_ipc_t* ipc, gfx_context_t* gfx, uint64_t* bb
     return 0;
 }
 
+static int init_gfx_for_boot(gfx_context_t* gfx) {
+    return gfx_init(gfx);
+}
+
 static void clamp_term_dimensions(term_t* term, uint32_t raw_cols, uint32_t raw_rows) {
     term->cols = raw_cols;
     term->rows = raw_rows;
@@ -313,7 +326,7 @@ static void clamp_term_dimensions(term_t* term, uint32_t raw_cols, uint32_t raw_
     if (term->rows == 0) term->rows = 1;
 }
 
-static int init_term_state(term_t* term, gfx_context_t* gfx, window_ipc_t* ipc) {
+static int init_term_state(term_t* term, gfx_context_t* gfx, uint32_t width, uint32_t height) {
     zero_memory(term, sizeof(*term));
     term->gfx = gfx;
 
@@ -322,15 +335,41 @@ static int init_term_state(term_t* term, gfx_context_t* gfx, window_ipc_t* ipc) 
         return -1;
     }
 
-    clamp_term_dimensions(term, ipc->width / term->glyph_w, ipc->height / term->glyph_h);
+    clamp_term_dimensions(term, width / term->glyph_w, height / term->glyph_h);
 
     term->fg = 15;
     term->bg = 0;
+    term->wm_active = 0;
+    term->wm_pid = -1;
     term->cursor_visible = 1;
     term_clear(term);
 
-    const char* banner = "libgfx -> idpterm\n";
-    for (size_t i = 0; banner[i]; ++i) term_putc(term, banner[i]);
+    const char* banner;
+    if (mode==TERM_MODE_WINDOWED) {
+        banner = "libgfx -> idpterm\n";
+        for (size_t i = 0; banner[i]; ++i) term_putc(term, banner[i]);
+    } else {
+        banner = "libgfx -> idpterm\n";
+        for (size_t i = 0; banner[i]; ++i) term_putc(term, banner[i]);
+        term->fg = 1;
+        const char* l1 = "No window manager is running.\n";
+        for (size_t i = 0; l1[i]; ++i) term_putc(term, l1[i]);
+        term->fg = 7;
+        const char* l2 = "Use ";
+        for (size_t i = 0; l2[i]; ++i) term_putc(term, l2[i]);
+        term->fg = 3;
+        const char* l3 = "startwm ";
+        for (size_t i = 0; l3[i]; ++i) term_putc(term, l3[i]);
+        term->fg = 7;
+        const char* l4 = "to start window manager.\nEdit ";
+        for (size_t i = 0; l4[i]; ++i) term_putc(term, l4[i]);
+        term->fg = 3;
+        const char* l5 = "/nvme/.wm ";
+        for (size_t i = 0; l5[i]; ++i) term_putc(term, l5[i]);
+        term->fg = 7;
+        const char* l6 = "to change path to window manager executable.\n";
+        for (size_t i = 0; l6[i]; ++i) term_putc(term, l6[i]);
+    }
     return 0;
 }
 
@@ -342,9 +381,9 @@ static void mark_visible_cells_dirty(term_t* term) {
     }
 }
 
-static int apply_resize_if_needed(term_t* term, window_ipc_t* ipc) {
-    uint32_t new_cols = ipc->width / term->glyph_w;
-    uint32_t new_rows = ipc->height / term->glyph_h;
+static int apply_resize_if_needed(term_t* term, uint32_t width, uint32_t height) {
+    uint32_t new_cols = width / term->glyph_w;
+    uint32_t new_rows = height / term->glyph_h;
 
     if (new_cols > MAX_COLS) new_cols = MAX_COLS;
     if (new_rows > MAX_ROWS) new_rows = MAX_ROWS;
@@ -361,12 +400,12 @@ static int apply_resize_if_needed(term_t* term, window_ipc_t* ipc) {
     if (term->col >= term->cols) term->col = term->cols - 1;
     if (term->row >= term->rows) term->row = term->rows - 1;
 
-    gfx_fill_rect(term->gfx, 0, 0, ipc->width, ipc->height, color(0));
+    gfx_fill_rect(term->gfx, 0, 0, width, height, color(0));
     mark_visible_cells_dirty(term);
     return 1;
 }
 
-static int start_shell_process(uint64_t* shell_in_r, uint64_t* shell_in_w, uint64_t* shell_out_r, uint64_t* shell_out_w) {
+static int start_shell_process(uint64_t* shell_in_r, uint64_t* shell_in_w, uint64_t* shell_out_r, uint64_t* shell_out_w, int* out_shell_pid) {
     if (sys_pipe(shell_in_r, shell_in_w) != ERR_SUCCESS || sys_pipe(shell_out_r, shell_out_w) != ERR_SUCCESS) {
         return -1;
     }
@@ -385,10 +424,14 @@ static int start_shell_process(uint64_t* shell_in_r, uint64_t* shell_in_w, uint6
         return -1;
     }
 
+    if (out_shell_pid != NULL) {
+        *out_shell_pid = shell_pid;
+    }
+
     return 0;
 }
 
-static void forward_key_event(window_ipc_t* ipc, uint64_t shell_in_w) {
+static void forward_window_key_event(window_ipc_t* ipc, uint64_t shell_in_w) {
     if (ipc->key_tail == ipc->key_head) {
         return;
     }
@@ -404,6 +447,24 @@ static void forward_key_event(window_ipc_t* ipc, uint64_t shell_in_w) {
             uint64_t wr;
             sys_write(shell_in_w, &ch, 1, &wr);
         }
+    }
+}
+
+static void forward_boot_key_event(uint64_t shell_in_w) {
+    if (!sys_keyboard_poll()) {
+        return;
+    }
+
+    key_event_t ev;
+    if (sys_keyboard_read(&ev) != ERR_SUCCESS || !ev.is_pressed) {
+        return;
+    }
+
+    uint8_t shift = (ev.status_mask & SHIFT_MASK) != 0;
+    char ch = get_ascii_char(ev.code, shift);
+    if (ch != 0) {
+        uint64_t wr;
+        sys_write(shell_in_w, &ch, 1, &wr);
     }
 }
 
@@ -515,8 +576,10 @@ static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* a
     else if (ansi->state == 4) {
         if (c == '\x07') {
             ansi->title_buf[ansi->title_len] = '\0';
-            for (int k = 0; k <= ansi->title_len; k++) {
-                ipc->title[k] = ansi->title_buf[k];
+            if (ipc != NULL) {
+                for (int k = 0; k <= ansi->title_len; k++) {
+                    ipc->title[k] = ansi->title_buf[k];
+                }
             }
             ansi->state = 0;
             *needs_render = 1;
@@ -574,6 +637,15 @@ static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* a
         } else if (c == 'H') {
             ansi_apply_cursor_position(term, ansi);
             ansi->state = 0;
+        } else if (c == 'W') {
+            if (ansi->param_count > 0 && ansi->params[0] == 2) {
+                int target_pid = ansi->has_value ? ansi->value : -1;
+                if (target_pid > 0) {
+                    term->wm_active = 1;
+                    term->wm_pid = target_pid;
+                }
+            }
+            ansi->state = 0;
         } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
             ansi->state = 0;
         }
@@ -600,29 +672,46 @@ static int process_shell_output(term_t* term, window_ipc_t* ipc, uint64_t shell_
 }
 
 void main(int argc, char** argv) {
-    if (argc < 2 || argv == NULL || argv[1] == NULL) {
+    mode = TERM_MODE_WINDOWED;
+    window_ipc_t* ipc = NULL;
+
+    if (argc >= 2 && argv != NULL && argv[1] != NULL && argv[1][0] == '-' && argv[1][1] == '-' &&
+        argv[1][2] == 'b' && argv[1][3] == 'o' && argv[1][4] == 'o' && argv[1][5] == 't' && argv[1][6] == '\0') {
+        mode = TERM_MODE_BOOT;
+    } else if (argc >= 2 && argv != NULL && argv[1] != NULL) {
+        uint64_t handle = parse_shm_handle(argv[1]);
+        ipc = (window_ipc_t*)sys_shm_map(handle);
+        if ((uint64_t)ipc == (uint64_t)-1) sys_exit(1);
+        set_default_title(ipc);
+    } else {
         sys_print("Terminal error: Missing SHM handle argument\n");
         sys_exit(1);
     }
 
-    uint64_t handle = parse_shm_handle(argv[1]);
-    window_ipc_t* ipc = (window_ipc_t*)sys_shm_map(handle);
-    if ((uint64_t)ipc == (uint64_t)-1) sys_exit(1);
-
-    set_default_title(ipc);
-
     gfx_context_t gfx;
     uint64_t bb_handle = 0;
-    if (init_gfx_from_ipc(ipc, &gfx, &bb_handle) != 0) {
-        sys_shm_unmap(ipc);
-        sys_exit(1);
+    if (mode == TERM_MODE_WINDOWED) {
+        if (init_gfx_from_ipc(ipc, &gfx, &bb_handle) != 0) {
+            sys_shm_unmap(ipc);
+            sys_exit(1);
+        }
+    } else {
+        if (init_gfx_for_boot(&gfx) != 0) {
+            sys_exit(1);
+        }
     }
 
     term_t term;
-    if (init_term_state(&term, &gfx, ipc) != 0) {
-        sys_shm_unmap(gfx.back_buffer);
-        sys_shm_destroy(bb_handle);
-        sys_shm_unmap(ipc);
+    uint32_t width = (mode == TERM_MODE_WINDOWED) ? ipc->width : (uint32_t)gfx.width;
+    uint32_t height = (mode == TERM_MODE_WINDOWED) ? ipc->height : (uint32_t)gfx.height;
+    if (init_term_state(&term, &gfx, width, height) != 0) {
+        if (mode == TERM_MODE_WINDOWED) {
+            sys_shm_unmap(gfx.back_buffer);
+            sys_shm_destroy(bb_handle);
+            sys_shm_unmap(ipc);
+        } else {
+            gfx_shutdown(&gfx);
+        }
         sys_exit(2);
     }
 
@@ -630,10 +719,15 @@ void main(int argc, char** argv) {
     uint64_t shell_in_w;
     uint64_t shell_out_r;
     uint64_t shell_out_w;
-    if (start_shell_process(&shell_in_r, &shell_in_w, &shell_out_r, &shell_out_w) != 0) {
-        sys_shm_unmap(gfx.back_buffer);
-        sys_shm_destroy(bb_handle);
-        sys_shm_unmap(ipc);
+    int shell_pid = -1;
+    if (start_shell_process(&shell_in_r, &shell_in_w, &shell_out_r, &shell_out_w, &shell_pid) != 0) {
+        if (mode == TERM_MODE_WINDOWED) {
+            sys_shm_unmap(gfx.back_buffer);
+            sys_shm_destroy(bb_handle);
+            sys_shm_unmap(ipc);
+        } else {
+            gfx_shutdown(&gfx);
+        }
         sys_exit(1);
     }
 
@@ -643,17 +737,53 @@ void main(int argc, char** argv) {
     while (1) {
         int needs_render = 0;
 
-        if (apply_resize_if_needed(&term, ipc)) {
-            needs_render = 1;
+        if (mode == TERM_MODE_WINDOWED) {
+            if (apply_resize_if_needed(&term, ipc->width, ipc->height)) {
+                needs_render = 1;
+            }
         }
 
-        forward_key_event(ipc, shell_in_w);
+        if (mode == TERM_MODE_WINDOWED) {
+            forward_window_key_event(ipc, shell_in_w);
+        } else {
+            if (!term.wm_active) {
+                forward_boot_key_event(shell_in_w);
+            }
+        }
         process_shell_output(&term, ipc, shell_out_r, &ansi, &needs_render);
+
+        if (mode == TERM_MODE_BOOT) {
+            int code = 0;
+            if (!term.wm_active) {
+                if (shell_pid >= 0 && sys_wait(shell_pid, &code) == 0) {
+                    gfx_shutdown(&gfx);
+                    sys_exit(code);
+                }
+            } else {
+                if (shell_pid >= 0 && sys_wait(shell_pid, &code) == 0) {
+                    term.wm_active = 0;
+                    term.wm_pid = -1;
+                    term_clear(&term);
+                    needs_render = 1;
+                    
+                    sys_close(shell_in_r);
+                    sys_close(shell_in_w);
+                    sys_close(shell_out_r);
+                    sys_close(shell_out_w);
+                    
+                    start_shell_process(&shell_in_r, &shell_in_w, &shell_out_r, &shell_out_w, &shell_pid);
+                }
+            }
+        }
 
         if (needs_render) {
             term_render(&term);
-            gfx_present(&gfx);
-            ipc->dirty = 1;
+            if (mode == TERM_MODE_WINDOWED || !term.wm_active) {
+                gfx_present(&gfx);
+            }
+            if (mode == TERM_MODE_WINDOWED) {
+                ipc->dirty = 1;
+            }
         }
 
         sys_yield();

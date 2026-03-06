@@ -163,6 +163,67 @@ static int normalize_path(char* out, size_t cap, const char* cwd, const char* pa
     return copy_str(out, cap, result);
 }
 
+static int is_space_char(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static int read_wm_path_from_file(char* out_path, size_t out_cap) {
+    if (out_path == NULL || out_cap == 0) {
+        return -1;
+    }
+
+    uint64_t fd = sys_open("/nvme/.wm", IDP_O_RDONLY);
+    if (fd == (uint64_t)ERR_FAIL) {
+        return -1;
+    }
+
+    char raw[MAX_PATH];
+    size_t total = 0;
+
+    while (total + 1 < sizeof(raw)) {
+        uint64_t rd = 0;
+        if (sys_read(fd, raw + total, sizeof(raw) - 1 - total, &rd) != ERR_SUCCESS) {
+            sys_close(fd);
+            return -1;
+        }
+
+        if (rd == 0) {
+            break;
+        }
+
+        total += (size_t)rd;
+    }
+
+    sys_close(fd);
+    raw[total] = '\0';
+
+    size_t start = 0;
+    while (raw[start] != '\0' && is_space_char(raw[start])) {
+        start++;
+    }
+
+    size_t end = total;
+    while (end > start && is_space_char(raw[end - 1])) {
+        end--;
+    }
+
+    if (end <= start) {
+        return -1;
+    }
+
+    size_t out_len = end - start;
+    if (out_len + 1 > out_cap) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < out_len; ++i) {
+        out_path[i] = raw[start + i];
+    }
+    out_path[out_len] = '\0';
+
+    return 0;
+}
+
 static int tokenize(char* line, char** argv, int max) {
     int n = 0;
     while (*line && n < max) {
@@ -245,6 +306,31 @@ void main(int argc, char** argv) {
             putchar('\n');
         } else if (streq(token_argv[0], "clear")) {
             printf(ANSI_CLEAR_SCREEN ANSI_CURSOR_HOME);
+        } else if (streq(token_argv[0], "startwm")) {
+            char wm_path[MAX_PATH];
+            if (read_wm_path_from_file(wm_path, sizeof(wm_path)) != 0) {
+                puts("startwm: failed to read /nvme/.wm");
+                last_err_code = 1;
+                continue;
+            }
+            printf("startwm: loading %s\n", wm_path);
+
+            const char* wm_args[] = {wm_path, NULL};
+            int wm_pid = sys_spawn(wm_path, wm_args);
+            if (wm_pid < 0) {
+                printf("startwm: failed to spawn %s\n", wm_path);
+                last_err_code = 1;
+                continue;
+            }
+            
+            printf("\033[2;%dW", wm_pid);
+            
+            int code = 0;
+            while (sys_wait(wm_pid, &code) == 1) {
+                sys_yield();
+            }
+            
+            sys_exit(0);
         } else if (streq(token_argv[0], "exit")) {
             sys_exit(0);
         } else {

@@ -131,10 +131,10 @@ void kmain(void) {
         serial_write_str("[KERNEL] framebuffer shared memory init failed\n");
     }
     
-    char wm_argv[16][64] = {{"/nvme/bin/idpwm.elf"}};
-    create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf", 1, wm_argv);
-    //char shell_argv[16][64] = {{"/nvme/bin/idpshell.elf"}};
-    //create_user_process_from_path("idpshell", "/nvme/bin/idpshell.elf", 1, shell_argv);
+    //char wm_argv[16][64] = {{"/nvme/bin/idpwm.elf"}};
+    //create_user_process_from_path("idpwm", "/nvme/bin/idpwm.elf", 1, wm_argv);
+    char boot_term_argv[16][64] = {{"/nvme/bin/idpterm.elf"}, {"--boot"}};
+    create_user_process_from_path("idpterm", "/nvme/bin/idpterm.elf", 2, boot_term_argv);
     
     apic_timer_start(500);
     asm volatile ("sti");

@@ -331,6 +331,7 @@ void main(int argc, char** argv) {
             }
             
             printf("\033[2;%dW", wm_pid);
+            fflush();
             
             int code = 0;
             while (sys_wait(wm_pid, &code) == 1) {

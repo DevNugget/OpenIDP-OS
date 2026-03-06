@@ -441,11 +441,24 @@ static void forward_window_key_event(window_ipc_t* ipc, uint64_t shell_in_w) {
 
     if (ev.is_pressed) {
         uint8_t shift = (ev.status_mask & SHIFT_MASK) != 0;
+        uint8_t ctrl  = (ev.status_mask & CTRL_MASK) != 0;
+        
         char ch = get_ascii_char(ev.code, shift);
+        uint64_t wr;
+
+        if (ctrl && ch >= 'a' && ch <= 'z') {
+            ch = ch - 'a' + 1;
+        } else if (ctrl && ch >= 'A' && ch <= 'Z') {
+            ch = ch - 'A' + 1;
+        }
 
         if (ch != 0) {
-            uint64_t wr;
             sys_write(shell_in_w, &ch, 1, &wr);
+        } else {
+            if (ev.code == KEY_UP) sys_write(shell_in_w, "\x1b[A", 3, &wr);
+            else if (ev.code == KEY_DOWN) sys_write(shell_in_w, "\x1b[B", 3, &wr);
+            else if (ev.code == KEY_RIGHT) sys_write(shell_in_w, "\x1b[C", 3, &wr);
+            else if (ev.code == KEY_LEFT) sys_write(shell_in_w, "\x1b[D", 3, &wr);
         }
     }
 }
@@ -506,6 +519,9 @@ static void ansi_apply_sgr(term_t* term, ansi_parser_t* ansi) {
 }
 
 static void ansi_apply_cursor_position(term_t* term, ansi_parser_t* ansi) {
+    if (ansi->has_value && ansi->param_count < ANSI_MAX_PARAMS) {
+        ansi->params[ansi->param_count++] = ansi->value;
+    }
     term->grid[term->row][term->col].dirty = 1;
 
     int r = 1;
@@ -545,7 +561,7 @@ static void ansi_init(ansi_parser_t* ansi) {
     ansi->title_len = 11;
 }
 
-static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* ansi, char c, int* needs_render) {
+static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* ansi, char c, int* needs_render, uint64_t shell_in_w) {
     if (ansi->state == 0) {
         if (c == '\x1b') ansi->state = 1;
         else term_putc(term, c);
@@ -646,29 +662,63 @@ static void process_shell_byte(term_t* term, window_ipc_t* ipc, ansi_parser_t* a
                 }
             }
             ansi->state = 0;
+        } else if (c == 't') {
+            if (ansi->has_value && ansi->value == 18) {
+                char buf[32];
+                buf[0] = '\x1b'; buf[1] = '['; buf[2] = '8'; buf[3] = ';';
+                int idx = 4;
+                
+                int r = term->rows;
+                char rbuf[10]; int rlen = 0;
+                while (r > 0) { rbuf[rlen++] = (char)('0' + (r % 10)); r /= 10; }
+                if (rlen == 0) rbuf[rlen++] = '0';
+                for (int i = rlen - 1; i >= 0; i--) buf[idx++] = rbuf[i];
+                
+                buf[idx++] = ';';
+                
+                int col = term->cols;
+                char cbuf[10]; int clen = 0;
+                while (col > 0) { cbuf[clen++] = (char)('0' + (col % 10)); col /= 10; }
+                if (clen == 0) cbuf[clen++] = '0';
+                for (int i = clen - 1; i >= 0; i--) buf[idx++] = cbuf[i];
+                
+                buf[idx++] = 't';
+                uint64_t wr;
+                sys_write(shell_in_w, buf, (uint64_t)idx, &wr);
+            }
+            ansi->state = 0;
         } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
             ansi->state = 0;
         }
     }
 }
 
-static int process_shell_output(term_t* term, window_ipc_t* ipc, uint64_t shell_out_r, ansi_parser_t* ansi, int* needs_render) {
-    char buf[64];
+static int process_shell_output(term_t* term, window_ipc_t* ipc, uint64_t shell_out_r, uint64_t shell_in_w, ansi_parser_t* ansi, int* needs_render) {
+    char buf[1024];
     uint64_t rd = 0;
-    sys_read(shell_out_r, buf, sizeof(buf), &rd);
+    int processed_any = 0;
 
-    if (rd == 0) {
-        return 0;
+    while (1) {
+        sys_read(shell_out_r, buf, sizeof(buf), &rd);
+        if (rd == 0) {
+            break;
+        }
+
+        for (uint64_t i = 0; i < rd; i++) {
+            process_shell_byte(term, ipc, ansi, buf[i], needs_render, shell_in_w);
+        }
+        processed_any = 1;
+        
+        if (rd < sizeof(buf)) {
+            break; 
+        }
     }
 
-    for (uint64_t i = 0; i < rd; i++) {
-        process_shell_byte(term, ipc, ansi, buf[i], needs_render);
-    }
-
-    if (ansi->state == 0) {
+    if (ansi->state == 0 && processed_any) {
         *needs_render = 1;
     }
-    return 1;
+    
+    return processed_any;
 }
 
 void main(int argc, char** argv) {
@@ -750,7 +800,7 @@ void main(int argc, char** argv) {
                 forward_boot_key_event(shell_in_w);
             }
         }
-        process_shell_output(&term, ipc, shell_out_r, &ansi, &needs_render);
+        process_shell_output(&term, ipc, shell_out_r, shell_in_w, &ansi, &needs_render);
 
         if (mode == TERM_MODE_BOOT) {
             int code = 0;

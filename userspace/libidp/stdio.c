@@ -8,6 +8,18 @@ static uint64_t g_stdout = 0;
 #define STDOUT_FD 1
 #define STDERR_FD 2
 
+#define STDOUT_BUF_SIZE 4096
+static char g_stdout_buf[STDOUT_BUF_SIZE];
+static int g_stdout_len = 0;
+
+void fflush(void) {
+    if (g_stdout_len > 0) {
+        uint64_t wr = 0;
+        sys_write(STDOUT_FD, g_stdout_buf, (uint64_t)g_stdout_len, &wr);
+        g_stdout_len = 0;
+    }
+}
+
 static uint64_t hex_to_u64(const char* str) {
     uint64_t val = 0;
     if (!str) return 0;
@@ -21,13 +33,15 @@ static uint64_t hex_to_u64(const char* str) {
 }
 
 int putchar(int c) {
-    uint64_t wr = 0;
-    char ch = (char)c;
-    sys_write(STDOUT_FD, &ch, 1, &wr);
+    g_stdout_buf[g_stdout_len++] = (char)c;
+    if (g_stdout_len >= STDOUT_BUF_SIZE || c == '\n') {
+        fflush();
+    }
     return c;
 }
 
 int getchar(void) {
+    fflush();
     char ch;
     uint64_t rd = 0;
     while (rd == 0) {

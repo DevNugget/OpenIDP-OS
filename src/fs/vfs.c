@@ -66,7 +66,7 @@ void vfs_init(void) {
 }
 
 vfs_status_t vfs_mount(const char* mount_point, const vfs_filesystem_ops_t* fs_ops) {
-    if (!mount_point || mount_point[0] != '/' || !fs_ops || !fs_ops->open || !fs_ops->read || !fs_ops->write || !fs_ops->close) {
+    if (!mount_point || mount_point[0] != '/' || !fs_ops || !fs_ops->open || !fs_ops->readdir || !fs_ops->read || !fs_ops->write || !fs_ops->close) {
         return VFS_ERR_INVALID;
     }
 
@@ -147,6 +147,18 @@ vfs_status_t vfs_create_pipe(vfs_file_t** out_read, vfs_file_t** out_write) {
     *out_write = &g_files[w_idx];
 
     return VFS_OK;
+}
+
+vfs_status_t vfs_readdir(vfs_file_t* file, void* out_dirent) {
+    if (!file || !file->in_use || !out_dirent) {
+        return VFS_ERR_INVALID;
+    }
+
+    if (file->type == VFS_TYPE_PIPE) {
+        return VFS_ERR_INVALID;
+    }
+
+    return file->mount->ops->readdir(file->mount->ops->fs_context, file->handle, out_dirent);
 }
 
 vfs_status_t vfs_read(vfs_file_t* file, void* buffer, size_t bytes, size_t* out_read) {

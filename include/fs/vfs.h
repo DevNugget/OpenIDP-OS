@@ -23,6 +23,7 @@ typedef struct {
     const char* name;
     void* fs_context;
     vfs_status_t (*open)(void* fs_context, const char* path, uint32_t flags, void** out_handle);
+    vfs_status_t (*readdir)(void* fs_context, void* dir_handle, void* out_dirent);
     vfs_status_t (*read)(void* fs_context, void* file_handle, void* buffer, size_t bytes, size_t* out_read);
     vfs_status_t (*write)(void* fs_context, void* file_handle, const void* buffer, size_t bytes, size_t* out_written);
     vfs_status_t (*close)(void* fs_context, void* file_handle);
@@ -32,6 +33,7 @@ void vfs_init(void);
 vfs_status_t vfs_mount(const char* mount_point, const vfs_filesystem_ops_t* fs_ops);
 vfs_status_t vfs_open(const char* path, uint32_t flags, vfs_file_t** out_file);
 vfs_status_t vfs_create_pipe(vfs_file_t** out_read, vfs_file_t** out_write);
+vfs_status_t vfs_readdir(vfs_file_t* file, void* out_dirent);
 vfs_status_t vfs_read(vfs_file_t* file, void* buffer, size_t bytes, size_t* out_read);
 vfs_status_t vfs_write(vfs_file_t* file, const void* buffer, size_t bytes, size_t* out_written);
 vfs_status_t vfs_close(vfs_file_t* file);

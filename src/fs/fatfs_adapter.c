@@ -5,6 +5,7 @@
 #include <fs/fatfs/ff.h>
 #include <memory/kheap.h>
 #include <utility/kstring.h>
+#include <syscall/syscall.h>
 
 static FATFS g_fatfs;
 
@@ -14,9 +15,18 @@ typedef struct {
 
 static fatfs_context_t g_fatfs_ctx;
 
+typedef enum {
+    FATFS_HANDLE_FILE = 1,
+    FATFS_HANDLE_DIR = 2
+} fatfs_handle_type_t;
+
 typedef struct {
-    FIL fil;
-} fatfs_file_t;
+    fatfs_handle_type_t type;
+    union {
+        FIL fil;
+        DIR dir;
+    } u;
+} fatfs_handle_t;
 
 static const char* fatfs_to_relative_path(const fatfs_context_t* ctx, const char* path) {
     if (!ctx || !path) {
@@ -52,25 +62,14 @@ static vfs_status_t fatfs_open(void* fs_context, const char* path, uint32_t flag
         return VFS_ERR_INVALID;
     }
 
-    fatfs_file_t* file = (fatfs_file_t*)kmalloc(sizeof(fatfs_file_t));
-    if (!file) {
+    fatfs_handle_t* handle = (fatfs_handle_t*)kmalloc(sizeof(fatfs_handle_t));
+    if (!handle) {
         return VFS_ERR_NO_SPACE;
-    }
-
-    uint8_t mode = 0;
-    if (flags & 0x1) {
-        mode |= FA_READ;
-    }
-    if (flags & 0x2) {
-        mode |= FA_WRITE;
-    }
-    if (flags & 0x4) {
-        mode |= FA_CREATE_ALWAYS;
     }
 
     char fat_path[96];
     if (strlen(rel_path) + 3 >= sizeof(fat_path)) {
-        kfree(file);
+        kfree(handle);
         return VFS_ERR_INVALID;
     }
 
@@ -78,26 +77,76 @@ static vfs_status_t fatfs_open(void* fs_context, const char* path, uint32_t flag
     fat_path[1] = ':';
     strcpy(&fat_path[2], rel_path);
 
-    FRESULT result = f_open(&file->fil, fat_path, mode);
+    if ((flags & IDP_O_DIRECTORY) != 0u) {
+        FRESULT dresult = f_opendir(&handle->u.dir, fat_path);
+        if (dresult != FR_OK) {
+            kfree(handle);
+            return VFS_ERR_NOT_FOUND;
+        }
+        handle->type = FATFS_HANDLE_DIR;
+        *out_handle = handle;
+        return VFS_OK;
+    }
+
+    uint8_t mode = 0;
+    if ((flags & IDP_O_RDONLY) != 0u) {
+        mode |= FA_READ;
+    }
+    if ((flags & IDP_O_WRONLY) != 0u) {
+        mode |= FA_WRITE;
+    }
+    if ((flags & IDP_O_CREATE) != 0u) {
+        mode |= FA_CREATE_ALWAYS;
+    }
+
+    FRESULT result = f_open(&handle->u.fil, fat_path, mode);
     if (result != FR_OK) {
-        kfree(file);
+        kfree(handle);
         return VFS_ERR_NOT_FOUND;
     }
 
-    *out_handle = file;
+    handle->type = FATFS_HANDLE_FILE;
+    *out_handle = handle;
+    return VFS_OK;
+}
+
+static vfs_status_t fatfs_readdir(void* fs_context, void* dir_handle, void* out_dirent) {
+    (void)fs_context;
+
+    fatfs_handle_t* handle = (fatfs_handle_t*)dir_handle;
+    idp_dirent_t* entry = (idp_dirent_t*)out_dirent;
+    if (!handle || !entry || handle->type != FATFS_HANDLE_DIR) {
+        return VFS_ERR_INVALID;
+    }
+
+    FILINFO info;
+    FRESULT result = f_readdir(&handle->u.dir, &info);
+    if (result != FR_OK) {
+        return VFS_ERR_IO;
+    }
+
+    if (info.fname[0] == '\0') {
+        entry->name[0] = '\0';
+        entry->type = 0;
+        return VFS_OK;
+    }
+
+    strncpy(entry->name, info.fname, IDP_DIRENT_NAME_MAX - 1);
+    entry->name[IDP_DIRENT_NAME_MAX - 1] = '\0';
+    entry->type = (info.fattrib & AM_DIR) ? IDP_DIRENT_TYPE_DIR : IDP_DIRENT_TYPE_FILE;
     return VFS_OK;
 }
 
 static vfs_status_t fatfs_read(void* fs_context, void* file_handle, void* buffer, size_t bytes, size_t* out_read) {
     (void)fs_context;
 
-    fatfs_file_t* file = (fatfs_file_t*)file_handle;
-    if (!file || !buffer) {
+    fatfs_handle_t* handle = (fatfs_handle_t*)file_handle;
+    if (!handle || !buffer || handle->type != FATFS_HANDLE_FILE) {
         return VFS_ERR_INVALID;
     }
 
     UINT br = 0;
-    FRESULT result = f_read(&file->fil, buffer, (UINT)bytes, &br);
+    FRESULT result = f_read(&handle->u.fil, buffer, (UINT)bytes, &br);
     if (out_read) {
         *out_read = br;
     }
@@ -108,13 +157,13 @@ static vfs_status_t fatfs_read(void* fs_context, void* file_handle, void* buffer
 static vfs_status_t fatfs_write(void* fs_context, void* file_handle, const void* buffer, size_t bytes, size_t* out_written) {
     (void)fs_context;
 
-    fatfs_file_t* file = (fatfs_file_t*)file_handle;
-    if (!file || !buffer) {
+    fatfs_handle_t* handle = (fatfs_handle_t*)file_handle;
+    if (!handle || !buffer || handle->type != FATFS_HANDLE_FILE) {
         return VFS_ERR_INVALID;
     }
 
     UINT bw = 0;
-    FRESULT result = f_write(&file->fil, buffer, (UINT)bytes, &bw);
+    FRESULT result = f_write(&handle->u.fil, buffer, (UINT)bytes, &bw);
     if (out_written) {
         *out_written = bw;
     }
@@ -125,13 +174,19 @@ static vfs_status_t fatfs_write(void* fs_context, void* file_handle, const void*
 static vfs_status_t fatfs_close(void* fs_context, void* file_handle) {
     (void)fs_context;
 
-    fatfs_file_t* file = (fatfs_file_t*)file_handle;
-    if (!file) {
+    fatfs_handle_t* handle = (fatfs_handle_t*)file_handle;
+    if (!handle) {
         return VFS_ERR_INVALID;
     }
 
-    FRESULT result = f_close(&file->fil);
-    kfree(file);
+    FRESULT result = FR_OK;
+    if (handle->type == FATFS_HANDLE_FILE) {
+        result = f_close(&handle->u.fil);
+    } else if (handle->type == FATFS_HANDLE_DIR) {
+        result = f_closedir(&handle->u.dir);
+    }
+
+    kfree(handle);
     return result == FR_OK ? VFS_OK : VFS_ERR_IO;
 }
 
@@ -160,6 +215,7 @@ bool fatfs_mount_nvme(const char* mount_point) {
         .name = "fatfs",
         .fs_context = &g_fatfs_ctx,
         .open = fatfs_open,
+        .readdir = fatfs_readdir,
         .read = fatfs_read,
         .write = fatfs_write,
         .close = fatfs_close

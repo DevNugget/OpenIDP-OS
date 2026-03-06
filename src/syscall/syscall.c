@@ -236,6 +236,22 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             break;
         }
 
+        case SYS_FS_READDIR: {
+            int fd = (int)context->rdi;
+            idp_dirent_t* out_entry = (idp_dirent_t*)(uintptr_t)context->rsi;
+
+            process_t* current_process = scheduler_current_thread()->parent;
+            vfs_file_t* file = get_fd(current_process, fd);
+
+            if (file == NULL || out_entry == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            context->rax = (vfs_readdir(file, out_entry) == VFS_OK) ? ERR_SUCCESS : (uint64_t)ERR_FAIL;
+            break;
+        }
+
         case SYS_FS_CLOSE: {
             int fd = (int)context->rdi;
             process_t* current_process = scheduler_current_thread()->parent;

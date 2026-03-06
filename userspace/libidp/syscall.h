@@ -28,9 +28,24 @@
 #define SYS_SYSINFO 21
 #define SYS_PROC_LIST 22
 #define SYS_DUP2 23
+#define SYS_FS_READDIR 24
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
+
+#define IDP_O_RDONLY    0x1
+#define IDP_O_WRONLY    0x2
+#define IDP_O_CREATE    0x4
+#define IDP_O_DIRECTORY 0x8
+
+#define IDP_DIRENT_TYPE_FILE 1
+#define IDP_DIRENT_TYPE_DIR  2
+#define IDP_DIRENT_NAME_MAX 64
+
+typedef struct idp_dirent_t {
+    uint8_t type;
+    char name[IDP_DIRENT_NAME_MAX];
+} idp_dirent_t;
 
 typedef struct framebuffer_user_info_t {
     uint64_t width;
@@ -256,10 +271,12 @@ static inline int sys_kill(int pid) {
     return (int)syscall_1(SYS_KILL, (uint64_t)pid);
 }
 
-#define IDP_O_RDONLY 0x1
-
 static inline uint64_t sys_open(const char* path, uint32_t flags) {
     return (uint64_t)syscall_2(SYS_FS_OPEN, (uint64_t)path, (uint64_t)flags);
+}
+
+static inline int sys_readdir(uint64_t fd, idp_dirent_t* out_entry) {
+    return (int)syscall_2(SYS_FS_READDIR, fd, (uint64_t)out_entry);
 }
 
 static inline int sys_read(uint64_t fd, void* buffer, uint64_t bytes, uint64_t* out_read) {

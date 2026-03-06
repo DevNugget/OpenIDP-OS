@@ -29,6 +29,22 @@
 #define SYS_SYSINFO 21
 #define SYS_PROC_LIST 22
 #define SYS_DUP2 23
+#define SYS_FS_READDIR 24
+
+#define IDP_O_RDONLY   0x1
+#define IDP_O_WRONLY   0x2
+#define IDP_O_CREATE   0x4
+#define IDP_O_DIRECTORY 0x8
+
+#define IDP_DIRENT_TYPE_FILE 1
+#define IDP_DIRENT_TYPE_DIR  2
+#define IDP_DIRENT_NAME_MAX 64
+
+typedef struct idp_dirent_t {
+    uint8_t type;
+    char name[IDP_DIRENT_NAME_MAX];
+} idp_dirent_t;
+
 
 typedef struct syscall_key_event_t {
     uint8_t code;

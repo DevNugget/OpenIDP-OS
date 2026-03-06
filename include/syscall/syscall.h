@@ -30,6 +30,8 @@
 #define SYS_PROC_LIST 22
 #define SYS_DUP2 23
 #define SYS_FS_READDIR 24
+#define SYS_GETCWD 25
+#define SYS_CHDIR 26
 
 #define IDP_O_RDONLY   0x1
 #define IDP_O_WRONLY   0x2

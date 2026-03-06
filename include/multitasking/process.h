@@ -35,6 +35,7 @@ typedef struct process_t {
     struct process_t* next_sibling;
     struct process_t* next;
     struct vfs_file* fd_table[PROCESS_MAX_FDS];
+    char cwd[256];
 } process_t;
 
 typedef struct process_user_info_t {

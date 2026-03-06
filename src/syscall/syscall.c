@@ -383,6 +383,56 @@ cpu_status_t* syscall_dispatch(cpu_status_t* context) {
             break;
         }
 
+        case SYS_GETCWD: {
+            char* user_buf = (char*)context->rdi;
+            size_t size = (size_t)context->rsi;
+            process_t* current_process = scheduler_current_thread()->parent;
+
+            if (user_buf == NULL || size == 0) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            if (current_process->cwd[0] == '\0') {
+                current_process->cwd[0] = '/';
+                current_process->cwd[1] = '\0';
+            }
+
+            if (copy_user_string(user_buf, size, current_process->cwd) == ERR_SUCCESS) {
+                context->rax = ERR_SUCCESS;
+            } else {
+                context->rax = (uint64_t)ERR_FAIL;
+            }
+            break;
+        }
+
+        case SYS_CHDIR: {
+            const char* new_path = (const char*)context->rdi;
+            process_t* current_process = scheduler_current_thread()->parent;
+
+            if (new_path == NULL) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+
+            vfs_file_t* test_dir = NULL;
+            if (vfs_open(new_path, IDP_O_DIRECTORY | IDP_O_RDONLY, &test_dir) != VFS_OK) {
+                context->rax = (uint64_t)ERR_FAIL;
+                break;
+            }
+            vfs_close(test_dir);
+
+            size_t i = 0;
+            while (i < 255 && new_path[i] != '\0') {
+                current_process->cwd[i] = new_path[i];
+                i++;
+            }
+            current_process->cwd[i] = '\0';
+
+            context->rax = ERR_SUCCESS;
+            break;
+        }
+
         default:
             serial_printf("[SYSCALL] Unknown syscall number: %u\n", (uint32_t)syscall_num);
             context->rax = (uint64_t)ERR_FAIL; 

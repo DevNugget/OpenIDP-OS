@@ -29,6 +29,8 @@
 #define SYS_PROC_LIST 22
 #define SYS_DUP2 23
 #define SYS_FS_READDIR 24
+#define SYS_GETCWD 25
+#define SYS_CHDIR 26
 
 #define ERR_SUCCESS 0
 #define ERR_FAIL   -1
@@ -305,6 +307,14 @@ static inline int sys_proc_list(process_user_info_t* out_entries, uint64_t capac
 
 static inline int sys_dup2(uint64_t oldfd, uint64_t newfd) {
     return (int)syscall_2(SYS_DUP2, oldfd, newfd);
+}
+
+static inline int sys_getcwd(char* buf, size_t size) {
+    return (int)syscall_2(SYS_GETCWD, (uint64_t)buf, size);
+}
+
+static inline int sys_chdir(const char* path) {
+    return (int)syscall_1(SYS_CHDIR, (uint64_t)path);
 }
 
 #endif

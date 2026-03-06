@@ -272,6 +272,7 @@ void main(int argc, char** argv) {
     int last_err_code = 0;
 
     while (1) {
+        sys_getcwd(cwd, sizeof(cwd));
         printf(ANSI_SET_TITLE("idpshell"));
         if (last_err_code != 0) {
             printf(
@@ -294,8 +295,14 @@ void main(int argc, char** argv) {
 
         if (streq(token_argv[0], "cd")) {
             const char* target = (token_argc > 1) ? token_argv[1] : "/";
-            if (normalize_path(cwd, sizeof(cwd), cwd, target) != 0) {
+            char target_path[MAX_PATH];
+            
+            if (normalize_path(target_path, sizeof(target_path), cwd, target) != 0) {
                 puts("cd: path too long");
+            } else {
+                if (sys_chdir(target_path) != ERR_SUCCESS) {
+                    printf("cd: %s: No such directory\n", target);
+                }
             }
         } else if (streq(token_argv[0], "pwd")) {
             puts(cwd);

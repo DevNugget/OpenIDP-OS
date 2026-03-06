@@ -804,12 +804,22 @@ int scheduler_spawn_process(const char* path, const char** user_argv, size_t par
         process->next_sibling = parent->first_child;
         parent->first_child = process;
 
+        size_t c = 0;
+        while (c < 255 && parent->cwd[c] != '\0') {
+            process->cwd[c] = parent->cwd[c];
+            c++;
+        }
+        process->cwd[c] = '\0';
+
         for (int i = 0; i < PROCESS_MAX_FDS; i++) {
             if (parent->fd_table[i] != NULL) {
                 process->fd_table[i] = parent->fd_table[i];
                 vfs_file_inc_ref(process->fd_table[i]);
             }
         }
+    } else {
+        process->cwd[0] = '/';
+        process->cwd[1] = '\0';
     }
     spinlock_unlock_irqrestore(&process_lock, flags);
 

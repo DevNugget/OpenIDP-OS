@@ -140,7 +140,7 @@ vfs_status_t vfs_create_pipe(vfs_file_t** out_read, vfs_file_t** out_write) {
     *out_read = &g_files[r_idx];
 
     g_files[w_idx].in_use = true;
-    g_files[r_idx].ref_count = 1;
+    g_files[w_idx].ref_count = 1;
     g_files[w_idx].type = VFS_TYPE_PIPE;
     g_files[w_idx].handle = p;
     g_files[w_idx].is_pipe_write_end = true;

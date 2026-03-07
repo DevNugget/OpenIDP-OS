@@ -27,6 +27,14 @@
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+#define MAX_SYNTAX_KEYWORDS 64
+#define MAX_KW_LEN 32
+
+typedef struct {
+    char word[MAX_KW_LEN];
+    char color[16];
+} syntax_kw_t;
+
 typedef struct {
     char text[MAX_LINE_LEN];
     int len;
@@ -52,9 +60,34 @@ typedef struct {
 
     char status[120];
     int status_is_error;
+
+    syntax_kw_t syntax[MAX_SYNTAX_KEYWORDS];
+    int syntax_count;
 } editor_state_t;
 
 static editor_state_t E;
+
+static int is_alpha_num(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static int str_cmp(const char* s1, const char* s2) {
+    while (*s1 && (*s1 == *s2)) { s1++; s2++; }
+    return *(unsigned char*)s1 - *(unsigned char*)s2;
+}
+
+static const char* get_color_code(const char* color_name) {
+    if (str_cmp(color_name, "BLACK") == 0) return ANSI_FG_BLACK;
+    if (str_cmp(color_name, "RED") == 0) return ANSI_FG_RED;
+    if (str_cmp(color_name, "GREEN") == 0) return ANSI_FG_GREEN;
+    if (str_cmp(color_name, "YELLOW") == 0) return ANSI_FG_YELLOW;
+    if (str_cmp(color_name, "BLUE") == 0) return ANSI_FG_BLUE;
+    if (str_cmp(color_name, "MAGENTA") == 0) return ANSI_FG_MAGENTA;
+    if (str_cmp(color_name, "CYAN") == 0) return ANSI_FG_CYAN;
+    if (str_cmp(color_name, "WHITE") == 0) return ANSI_FG_WHITE;
+    if (str_cmp(color_name, "BWHITE") == 0) return ANSI_FG_BRIGHT_WHITE;
+    return ANSI_RESET;
+}
 
 static size_t str_len(const char* s) {
     size_t n = 0;
@@ -180,10 +213,74 @@ static void append_line(const char* data, int len) {
     E.lines[line_index].len = pos;
 }
 
+static void load_syntax(void) {
+    E.syntax_count = 0;
+    if (!E.has_filename) return;
+
+    const char* ext = NULL;
+    for (int i = 0; E.filename[i] != '\0'; i++) {
+        if (E.filename[i] == '.') ext = &E.filename[i + 1];
+    }
+    if (!ext) return;
+
+    char path[MAX_FILENAME];
+    copy_str(path, sizeof(path), "/nvme/.config/");
+    int p_len = (int)str_len(path);
+    
+    for (int i = 0; ext[i] != '\0' && p_len < MAX_FILENAME - 9; i++) {
+        path[p_len++] = ext[i];
+    }
+    
+    const char* suffix = ".syntax";
+    for (int i = 0; suffix[i] != '\0' && p_len < MAX_FILENAME - 1; i++) {
+        path[p_len++] = suffix[i];
+    }
+    path[p_len] = '\0';
+
+    uint64_t fd = sys_open(path, IDP_O_RDONLY);
+    if (fd == (uint64_t)ERR_FAIL) return; 
+
+    char buf[1024];
+    uint64_t rd = 0;
+    if (sys_read(fd, buf, sizeof(buf) - 1, &rd) == ERR_SUCCESS && rd > 0) {
+        buf[rd] = '\0';
+        int i = 0;
+        
+        while (i < rd && E.syntax_count < MAX_SYNTAX_KEYWORDS) {
+            while (buf[i] == ' ' || buf[i] == '\n' || buf[i] == '\r') i++;
+            if (i >= rd) break;
+            
+            int kw_len = 0;
+            char kw[MAX_KW_LEN];
+            while (buf[i] != ' ' && buf[i] != '\n' && buf[i] != '\r' && buf[i] != '\0' && kw_len < MAX_KW_LEN - 1) {
+                kw[kw_len++] = buf[i++];
+            }
+            kw[kw_len] = '\0';
+            
+            while (buf[i] == ' ' || buf[i] == '\t') i++;
+            
+            int c_len = 0;
+            char color[16];
+            while (buf[i] != ' ' && buf[i] != '\n' && buf[i] != '\r' && buf[i] != '\0' && c_len < 15) {
+                color[c_len++] = buf[i++];
+            }
+            color[c_len] = '\0';
+            
+            if (kw_len > 0 && c_len > 0) {
+                copy_str(E.syntax[E.syntax_count].word, MAX_KW_LEN, kw);
+                copy_str(E.syntax[E.syntax_count].color, 16, get_color_code(color));
+                E.syntax_count++;
+            }
+        }
+    }
+    sys_close(fd);
+}
+
 static int load_file(const char* path) {
     uint64_t fd = sys_open(path, IDP_O_RDONLY);
     if (fd == (uint64_t)ERR_FAIL) {
         set_status("new file", 0);
+        load_syntax();
         return 0;
     }
 
@@ -205,6 +302,7 @@ static int load_file(const char* path) {
 
     E.dirty = 0;
     set_status("opened file", 0);
+    load_syntax();
     return 0;
 }
 
@@ -266,15 +364,47 @@ static void render_rows(void) {
         if (available < 0) available = 0;
         if (available > EDITOR_COLS) available = EDITOR_COLS;
 
-        for (int i = 0; i < available; i++) {
-            char ch = line->text[E.col_offset + i];
-            if (ch == '\t') {
-                putchar(' ');
-                putchar(' ');
-                putchar(' ');
-                putchar(' ');
+        for (int i = 0; i < available; ) {
+            int text_idx = E.col_offset + i;
+            int kw_match = -1;
+            int kw_len = 0;
+
+            for (int k = 0; k < E.syntax_count; k++) {
+                kw_len = (int)str_len(E.syntax[k].word);
+                if (text_idx + kw_len > line->len) continue;
+
+                int match = 1;
+                for (int j = 0; j < kw_len; j++) {
+                    if (line->text[text_idx + j] != E.syntax[k].word[j]) {
+                        match = 0; break;
+                    }
+                }
+
+                if (match) {
+                    int start_bound_ok = (text_idx == 0 || !is_alpha_num(line->text[text_idx - 1]));
+                    int end_bound_ok = (text_idx + kw_len >= line->len || !is_alpha_num(line->text[text_idx + kw_len]));
+                    
+                    if (is_alpha_num(E.syntax[k].word[0]) && !start_bound_ok) match = 0;
+                    if (is_alpha_num(E.syntax[k].word[kw_len - 1]) && !end_bound_ok) match = 0;
+                }
+
+                if (match) {
+                    kw_match = k;
+                    break;
+                }
+            }
+
+            if (kw_match >= 0) {
+                printf("%s", E.syntax[kw_match].color);
+                for (int j = 0; j < kw_len && i < available; j++, i++) {
+                    char ch = line->text[E.col_offset + i];
+                    if (ch == '\t') printf("    "); else putchar(ch);
+                }
+                printf(ANSI_RESET);
             } else {
-                putchar(ch);
+                char ch = line->text[E.col_offset + i];
+                if (ch == '\t') printf("    "); else putchar(ch);
+                i++;
             }
         }
     }

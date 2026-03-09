@@ -5,7 +5,7 @@ CC ?= cc
 CFLAGS := -g -O2 -Wall -Wextra -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -I.. -mno-sse -mno-avx
 LDFLAGS := -nostdlib -static -no-pie -T linker.ld
 
-SRC := idpwm.c ../libgfx/gfx.c
+SRC := idpwm.c ../libgfx/gfx.c ../libidp/string.c ../libidp/type.c
 OBJ := $(SRC:.c=.o)
 
 .PHONY: all clean

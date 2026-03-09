@@ -12,21 +12,20 @@
 
 #define WM_CONTROL_MAGIC 0x574D4354u
 #define WM_MAX_REQUESTS 16
-#define WM_PATH_MAX 256
-#define WM_ARG_MAX 256
 
 typedef struct {
-    volatile uint8_t pending;
-    char executable[WM_PATH_MAX];
-    char argument[WM_ARG_MAX];
-} wm_spawn_request_t;
+    volatile uint8_t state;
+    int32_t requester_pid;
+    char title[WINDOW_TITLE_MAX];
+    uint64_t window_shm_handle;
+} wm_window_request_t;
 
 typedef struct {
     uint32_t magic;
     uint32_t version;
     volatile uint8_t request_head;
     volatile uint8_t request_tail;
-    wm_spawn_request_t requests[WM_MAX_REQUESTS];
+    wm_window_request_t requests[WM_MAX_REQUESTS];
 } wm_control_ipc_t;
 
 typedef struct {
@@ -42,7 +41,7 @@ typedef struct {
     volatile uint8_t dirty;
     volatile uint8_t focused;
 
-    uint32_t pixels[]; 
+    uint32_t pixels[];
 } window_ipc_t;
 
 #endif

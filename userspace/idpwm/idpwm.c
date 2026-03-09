@@ -1,6 +1,7 @@
 #include <libidp/syscall.h>
 #include <libidp/window.h>
 #include <libgfx/gfx.h>
+#include <libidp/string.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -248,45 +249,13 @@ static void wm_focus_prev(wm_state_t* wm) {
     }
 }
 
-static int u64_to_dec(uint64_t value, char* out, int out_len) {
-    if (!out || out_len <= 1) {
-        return 0;
-    }
-
-    char tmp[32];
-    int n = 0;
-
-    if (value == 0) {
-        if (out_len < 2) {
-            return 0;
-        }
-        out[0] = '0';
-        out[1] = '\0';
-        return 1;
-    }
-
-    while (value > 0 && n < (int)sizeof(tmp)) {
-        tmp[n++] = (char)('0' + (value % 10));
-        value /= 10;
-    }
-
-    if (n >= out_len) {
-        n = out_len - 1;
-    }
-
-    for (int i = 0; i < n; ++i) {
-        out[i] = tmp[n - i - 1];
-    }
-    out[n] = '\0';
-    return n;
-}
-
-static void wm_spawn_client(wm_state_t* wm, const char* executable, const char* app_arg) {
-    if (wm->client_count >= IDPWM_MAX_CLIENTS || !executable || executable[0] == '\0') return;
+static int wm_create_client(wm_state_t* wm, int32_t owner_pid, const char* title, uint64_t* out_shm_handle) {
+    if (wm->client_count >= IDPWM_MAX_CLIENTS || !out_shm_handle) return -1;
 
     uint8_t idx = wm->client_count;
     wm_client_t* c = &wm->clients[idx];
     c->id = idx + 1;
+    c->pid = owner_pid;
     c->alive = 1;
     c->color = palette[idx % (sizeof(palette) / sizeof(palette[0]))];
     c->frame = (rect_t){0, 0, 0, 0};
@@ -294,7 +263,7 @@ static void wm_spawn_client(wm_state_t* wm, const char* executable, const char* 
     uint64_t shm_size = sizeof(window_ipc_t) + (WINDOW_MAX_WIDTH * WINDOW_MAX_HEIGHT * 4);
     c->shm_handle = (uint64_t)sys_shm_create(shm_size);
     if ((int64_t)c->shm_handle < 0) {
-        return;
+        return -1;
     }
 
     c->ipc = (window_ipc_t*)sys_shm_map(c->shm_handle);
@@ -302,7 +271,7 @@ static void wm_spawn_client(wm_state_t* wm, const char* executable, const char* 
         sys_shm_destroy(c->shm_handle);
         c->shm_handle = 0;
         c->ipc = NULL;
-        return;
+        return -1;
     }
 
     c->ipc->width = WINDOW_MAX_WIDTH;
@@ -310,30 +279,22 @@ static void wm_spawn_client(wm_state_t* wm, const char* executable, const char* 
     c->ipc->pitch_bytes = WINDOW_MAX_WIDTH * 4;
     c->ipc->key_head = 0;
     c->ipc->key_tail = 0;
+    c->ipc->dirty = 0;
+    c->ipc->focused = 0;
+    strlcpy(c->ipc->title, (title && title[0] != '\0') ? title : "Window", WINDOW_TITLE_MAX);
 
-    char handle_str[32];
-    u64_to_dec(c->shm_handle, handle_str, sizeof(handle_str));
-
-    const char* args_with_param[] = {executable, handle_str, app_arg, NULL};
-    const char* args_no_param[] = {executable, handle_str, NULL};
-    const char** spawn_argv = (app_arg && app_arg[0] != '\0') ? args_with_param : args_no_param;
-
-    c->pid = sys_spawn(executable, spawn_argv);
-    if (c->pid < 0) {
-        sys_shm_unmap(c->ipc);
-        sys_shm_destroy(c->shm_handle);
-        c->ipc = NULL;
-        c->shm_handle = 0;
-        return;
-    }
-
+    *out_shm_handle = c->shm_handle;
     wm->client_count++;
     wm->focused_index = idx;
     wm->dirty = 1;
+    return 0;
 }
 
 static void wm_spawn_terminal_client(wm_state_t* wm) {
-    wm_spawn_client(wm, "/nvme/bin/idpterm.elf", NULL);
+    (void)wm;
+    const char* executable = "/nvme/bin/idpterm.elf";
+    const char* argv[] = {executable, NULL};
+    sys_spawn(executable, argv);
 }
 
 static int wm_init_control_channel(wm_state_t* wm) {
@@ -357,9 +318,10 @@ static int wm_init_control_channel(wm_state_t* wm) {
     wm->control_ipc->request_tail = 0;
 
     for (uint8_t i = 0; i < WM_MAX_REQUESTS; ++i) {
-        wm->control_ipc->requests[i].pending = 0;
-        wm->control_ipc->requests[i].executable[0] = '\0';
-        wm->control_ipc->requests[i].argument[0] = '\0';
+        wm->control_ipc->requests[i].state = 0;
+        wm->control_ipc->requests[i].requester_pid = 0;
+        wm->control_ipc->requests[i].window_shm_handle = 0;
+        wm->control_ipc->requests[i].title[0] = '\0';
     }
 
     return 0;
@@ -372,17 +334,24 @@ static void wm_process_control_requests(wm_state_t* wm) {
 
     while (wm->control_ipc->request_tail != wm->control_ipc->request_head) {
         uint8_t idx = wm->control_ipc->request_tail;
-        wm_spawn_request_t* req = &wm->control_ipc->requests[idx];
+        wm_window_request_t* req = &wm->control_ipc->requests[idx];
 
-        if (req->pending && req->executable[0] != '\0') {
-            wm_spawn_client(wm, req->executable, req->argument);
-            wm->dirty = 1;
+        if (req->state == 1) {
+            uint64_t window_handle = 0;
+            if (wm_create_client(wm, req->requester_pid, req->title, &window_handle) == 0) {
+                req->window_shm_handle = window_handle;
+                req->state = 2;
+            } else {
+                req->window_shm_handle = 0;
+                req->state = 3;
+            }
         }
 
-        req->pending = 0;
-        req->executable[0] = '\0';
-        req->argument[0] = '\0';
-        wm->control_ipc->request_tail = (uint8_t)((wm->control_ipc->request_tail + 1) % WM_MAX_REQUESTS);
+        if (req->state == 0) {
+            wm->control_ipc->request_tail = (uint8_t)((wm->control_ipc->request_tail + 1) % WM_MAX_REQUESTS);
+        } else {
+            break;
+        }
     }
 }
 
@@ -392,8 +361,8 @@ static void wm_close_focused(wm_state_t* wm) {
     }
 
     wm_client_t* victim = &wm->clients[wm->focused_index];
-    if (victim->pid > 0) { 
-        sys_kill(victim->pid); 
+    if (victim->pid > 0) {
+        sys_kill(victim->pid);
     }
 
     if (victim->ipc != NULL) {
@@ -601,7 +570,7 @@ void main() {
         } else {
             wm_render_dirty_clients(&wm);
         }
-        
+
         sys_yield();
     }
 

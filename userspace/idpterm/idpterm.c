@@ -1,5 +1,6 @@
 #include <libidp/syscall.h>
 #include <libidp/window.h>
+#include <libidp/window_client.h>
 #include <libgfx/gfx.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -724,27 +725,23 @@ static int process_shell_output(term_t* term, window_ipc_t* ipc, uint64_t shell_
 void main(int argc, char** argv) {
     mode = TERM_MODE_WINDOWED;
     window_ipc_t* ipc = NULL;
+    idp_window_t win = {0};
 
     if (argc >= 2 && argv != NULL && argv[1] != NULL && argv[1][0] == '-' && argv[1][1] == '-' &&
         argv[1][2] == 'b' && argv[1][3] == 'o' && argv[1][4] == 'o' && argv[1][5] == 't' && argv[1][6] == '\0') {
         mode = TERM_MODE_BOOT;
-    } else if (argc >= 2 && argv != NULL && argv[1] != NULL) {
-        uint64_t handle = parse_shm_handle(argv[1]);
-        ipc = (window_ipc_t*)sys_shm_map(handle);
-        if ((uint64_t)ipc == (uint64_t)-1) sys_exit(1);
-        set_default_title(ipc);
     } else {
-        sys_print("Terminal error: Missing SHM handle argument\n");
-        sys_exit(1);
+        if (idp_window_open(&win, "idpterm") != 0) {
+            sys_print("Terminal error: Failed to create window\n");
+            sys_exit(1);
+        }
+        ipc = win.ipc;
+        set_default_title(ipc);
     }
 
     gfx_context_t gfx;
-    uint64_t bb_handle = 0;
     if (mode == TERM_MODE_WINDOWED) {
-        if (init_gfx_from_ipc(ipc, &gfx, &bb_handle) != 0) {
-            sys_shm_unmap(ipc);
-            sys_exit(1);
-        }
+        gfx = win.gfx;
     } else {
         if (init_gfx_for_boot(&gfx) != 0) {
             sys_exit(1);
@@ -756,9 +753,7 @@ void main(int argc, char** argv) {
     uint32_t height = (mode == TERM_MODE_WINDOWED) ? ipc->height : (uint32_t)gfx.height;
     if (init_term_state(&term, &gfx, width, height) != 0) {
         if (mode == TERM_MODE_WINDOWED) {
-            sys_shm_unmap(gfx.back_buffer);
-            sys_shm_destroy(bb_handle);
-            sys_shm_unmap(ipc);
+            idp_window_destroy(&win);
         } else {
             gfx_shutdown(&gfx);
         }
@@ -772,9 +767,7 @@ void main(int argc, char** argv) {
     int shell_pid = -1;
     if (start_shell_process(&shell_in_r, &shell_in_w, &shell_out_r, &shell_out_w, &shell_pid) != 0) {
         if (mode == TERM_MODE_WINDOWED) {
-            sys_shm_unmap(gfx.back_buffer);
-            sys_shm_destroy(bb_handle);
-            sys_shm_unmap(ipc);
+            idp_window_destroy(&win);
         } else {
             gfx_shutdown(&gfx);
         }
@@ -788,18 +781,17 @@ void main(int argc, char** argv) {
         int needs_render = 0;
 
         if (mode == TERM_MODE_WINDOWED) {
-            if (apply_resize_if_needed(&term, ipc->width, ipc->height)) {
+            if (idp_window_poll_resize(&win)) {
+                apply_resize_if_needed(&term, ipc->width, ipc->height);
                 needs_render = 1;
             }
-        }
-
-        if (mode == TERM_MODE_WINDOWED) {
             forward_window_key_event(ipc, shell_in_w);
         } else {
             if (!term.wm_active) {
                 forward_boot_key_event(shell_in_w);
             }
         }
+
         process_shell_output(&term, ipc, shell_out_r, shell_in_w, &ansi, &needs_render);
 
         if (mode == TERM_MODE_BOOT) {
@@ -815,12 +807,12 @@ void main(int argc, char** argv) {
                     term.wm_pid = -1;
                     term_clear(&term);
                     needs_render = 1;
-                    
+
                     sys_close(shell_in_r);
                     sys_close(shell_in_w);
                     sys_close(shell_out_r);
                     sys_close(shell_out_w);
-                    
+
                     start_shell_process(&shell_in_r, &shell_in_w, &shell_out_r, &shell_out_w, &shell_pid);
                 }
             }

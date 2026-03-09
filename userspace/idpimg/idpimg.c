@@ -1,13 +1,10 @@
 #include <libidp/syscall.h>
 #include <libidp/window_client.h>
 #include <libidp/string.h>
-#include <libidp/type.h>
 #include <libidp/stdio.h>
 #include <libgfx/gfx.h>
 #include <stdint.h>
 #include <stddef.h>
-
-#define WM_CONTROL_SCAN_MAX 65535
 
 static void draw_image_fit(gfx_context_t* gfx, const gfx_image_t* image, uint32_t view_w, uint32_t view_h) {
     if (view_w == 0 || view_h == 0 || image->width == 0 || image->height == 0) {
@@ -51,42 +48,23 @@ void main(int argc, char** argv) {
         sys_exit(1);
     }
 
-    if (!is_numeric(argv[1])) {
-        uint64_t test_fd = sys_open(argv[1], IDP_O_RDONLY);
-        if (test_fd == (uint64_t)ERR_FAIL) {
-            printf("idpimg: cannot open file or file does not exist: %s\n", argv[1]);
-            sys_exit(1);
-        }
-        sys_close(test_fd);
-
-        if (idp_window_request("/nvme/bin/idpimg.elf", argv[1]) != 0) {
-            printf("idpimg: idpwm control channel not found or full\n");
-            sys_exit(1);
-        }
-        sys_exit(0);
-    }
-
-    if (argc < 3 || argv[2] == NULL) {
-        printf("idpimg: missing image path after window handle\n");
+    const char* image_path = argv[1];
+    uint64_t test_fd = sys_open(image_path, IDP_O_RDONLY);
+    if (test_fd == (uint64_t)ERR_FAIL) {
+        printf("idpimg: cannot open file or file does not exist: %s\n", image_path);
         sys_exit(1);
     }
+    sys_close(test_fd);
 
-    uint64_t window_handle = 0;
-    if (parse_u64(argv[1], &window_handle) != 0) {
-        printf("idpimg: invalid window handle\n");
-        sys_exit(1);
-    }
-    const char* image_path = argv[2];
-    
     gfx_image_t image = {0};
     if (gfx_load_image(image_path, &image) != ERR_SUCCESS) {
         printf("idpimg: failed to load image file\n");
-        sys_exit(1); 
+        sys_exit(1);
     }
 
     idp_window_t win;
-    if (idp_window_attach(window_handle, &win) != 0) {
-        printf("idpimg: failed to initialize window\n");
+    if (idp_window_open(&win, "idpimg") != 0) {
+        printf("idpimg: failed to create window\n");
         gfx_unload_image(&image);
         sys_exit(1);
     }
@@ -97,8 +75,10 @@ void main(int argc, char** argv) {
     strlcpy(title_buf + title_len, image_path, sizeof(title_buf) - title_len);
     idp_window_set_title(&win, title_buf);
 
-    uint8_t running = 1;
+    draw_image_fit(&win.gfx, &image, win.gfx.width, win.gfx.height);
+    idp_window_present(&win);
 
+    uint8_t running = 1;
     while (running) {
         if (idp_window_poll_resize(&win)) {
             draw_image_fit(&win.gfx, &image, win.gfx.width, win.gfx.height);

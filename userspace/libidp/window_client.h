@@ -14,8 +14,7 @@ typedef struct {
     uint32_t last_height;
 } idp_window_t;
 
-int idp_window_request(const char* executable_path, const char* argument);
-int idp_window_attach(uint64_t handle, idp_window_t* out_win);
+int idp_window_open(idp_window_t* out_win, const char* title);
 void idp_window_set_title(idp_window_t* win, const char* title);
 int idp_window_poll_resize(idp_window_t* win);
 int idp_window_poll_key(idp_window_t* win, key_event_t* out_ev);

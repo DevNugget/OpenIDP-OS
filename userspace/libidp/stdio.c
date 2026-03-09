@@ -1,9 +1,6 @@
 #include <libidp/stdio.h>
 #include <libidp/syscall.h>
 
-static uint64_t g_stdin = 0;
-static uint64_t g_stdout = 0;
-
 #define STDIN_FD  0
 #define STDOUT_FD 1
 #define STDERR_FD 2
@@ -18,18 +15,6 @@ void fflush(void) {
         sys_write(STDOUT_FD, g_stdout_buf, (uint64_t)g_stdout_len, &wr);
         g_stdout_len = 0;
     }
-}
-
-static uint64_t hex_to_u64(const char* str) {
-    uint64_t val = 0;
-    if (!str) return 0;
-    for (int i = 0; str[i] != '\0'; i++) {
-        val *= 16;
-        if (str[i] >= '0' && str[i] <= '9') val += (uint64_t)(str[i] - '0');
-        else if (str[i] >= 'A' && str[i] <= 'F') val += (uint64_t)(str[i] - 'A' + 10);
-        else if (str[i] >= 'a' && str[i] <= 'f') val += (uint64_t)(str[i] - 'a' + 10);
-    }
-    return val;
 }
 
 int putchar(int c) {

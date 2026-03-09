@@ -1,21 +1,13 @@
 #include <libidp/window_client.h>
 #include <libidp/syscall.h>
+#include <libidp/string.h>
 #include <stddef.h>
 
 #define WM_CONTROL_SCAN_MAX 65535
 
 static void str_copy_limit(char* dst, int dst_len, const char* src) {
     if (!dst || dst_len <= 0) return;
-    if (!src) {
-        dst[0] = '\0';
-        return;
-    }
-    int i = 0;
-    while (src[i] && i < dst_len - 1) {
-        dst[i] = src[i];
-        i++;
-    }
-    dst[i] = '\0';
+    strlcpy(dst, src, (size_t)dst_len);
 }
 
 static uint64_t find_wm_control_handle(void) {

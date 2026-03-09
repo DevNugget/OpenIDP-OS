@@ -1,26 +1,13 @@
 #include <libidp/syscall.h>
 #include <libidp/window_client.h>
+#include <libidp/string.h>
+#include <libidp/type.h>
 #include <libidp/stdio.h>
 #include <libgfx/gfx.h>
 #include <stdint.h>
 #include <stddef.h>
 
 #define WM_CONTROL_SCAN_MAX 65535
-
-static int starts_with_number(const char* s) {
-    return s && s[0] >= '0' && s[0] <= '9';
-}
-
-static uint64_t parse_u64(const char* arg) {
-    uint64_t value = 0;
-    if (!arg) return 0;
-
-    for (int i = 0; arg[i] != '\0'; ++i) {
-        if (arg[i] < '0' || arg[i] > '9') break;
-        value = (value * 10) + (uint64_t)(arg[i] - '0');
-    }
-    return value;
-}
 
 static void draw_image_fit(gfx_context_t* gfx, const gfx_image_t* image, uint32_t view_w, uint32_t view_h) {
     if (view_w == 0 || view_h == 0 || image->width == 0 || image->height == 0) {
@@ -64,7 +51,7 @@ void main(int argc, char** argv) {
         sys_exit(1);
     }
 
-    if (!starts_with_number(argv[1])) {
+    if (!is_numeric(argv[1])) {
         uint64_t test_fd = sys_open(argv[1], IDP_O_RDONLY);
         if (test_fd == (uint64_t)ERR_FAIL) {
             printf("idpimg: cannot open file or file does not exist: %s\n", argv[1]);
@@ -84,7 +71,11 @@ void main(int argc, char** argv) {
         sys_exit(1);
     }
 
-    uint64_t window_handle = parse_u64(argv[1]);
+    uint64_t window_handle = 0;
+    if (parse_u64(argv[1], &window_handle) != 0) {
+        printf("idpimg: invalid window handle\n");
+        sys_exit(1);
+    }
     const char* image_path = argv[2];
     
     gfx_image_t image = {0};
@@ -101,11 +92,9 @@ void main(int argc, char** argv) {
     }
 
     char title_buf[WINDOW_TITLE_MAX];
-    const char* prefix = " idpimg - ";
-    int idx = 0, src_idx = 0;
-    while (prefix[idx] && idx < WINDOW_TITLE_MAX - 1) { title_buf[idx] = prefix[idx]; idx++; }
-    while (image_path[src_idx] && idx < WINDOW_TITLE_MAX - 1) { title_buf[idx++] = image_path[src_idx++]; }
-    title_buf[idx] = '\0';
+    strlcpy(title_buf, "idpimg - ", sizeof(title_buf));
+    size_t title_len = strlen(title_buf);
+    strlcpy(title_buf + title_len, image_path, sizeof(title_buf) - title_len);
     idp_window_set_title(&win, title_buf);
 
     uint8_t running = 1;

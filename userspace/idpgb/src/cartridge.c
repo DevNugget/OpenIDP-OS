@@ -144,7 +144,7 @@ bool cartridge_load(char* path) {
     printf("idpgb: opened rom file %s\n", path);
 
     uint32_t total_size = 0;
-    char buf[512];
+    char buf[1024];
     size_t read_bytes = 0;
     
     while (fs_read(&file, buf, sizeof(buf), &read_bytes) == ERR_SUCCESS) {
@@ -205,4 +205,12 @@ bool cartridge_load(char* path) {
     printf("  Checksum : "ANSI_FG_YELLOW"%x"ANSI_RESET" (%s)\n", cartridge_ctx.header->checksum, checksum_passed ? ANSI_FG_GREEN"PASSED"ANSI_RESET : ANSI_FG_RED"FAILED"ANSI_RESET);
     
     return true;
+}
+
+uint8_t cartridge_read(uint16_t addr) {
+    return cartridge_ctx.rom_data[addr];
+}
+
+void cartridge_write(uint16_t addr, uint8_t value) {
+
 }

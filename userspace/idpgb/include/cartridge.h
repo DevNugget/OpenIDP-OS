@@ -22,5 +22,7 @@ typedef struct __attribute__((packed)) {
 } rom_header_t;
 
 bool cartridge_load(char* cartridge);
+uint8_t cartridge_read(uint16_t addr);
+void cartridge_write(uint16_t addr, uint8_t value);
 
 #endif

@@ -12,5 +12,6 @@ typedef struct {
 
 int emulator_run(int argc, char** argv);
 emulator_ctx_t* get_emulator_ctx();
+void emulator_cycles(int cpu_cycles);
 
 #endif
